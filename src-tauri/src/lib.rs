@@ -73,12 +73,12 @@ pub fn run() {
                     MenuItemBuilder::with_id("search_tags", "Search by Tag...").build(app)?;
 
                 let toggle_sidebar =
-                    MenuItemBuilder::with_id("toggle_sidebar", "Toggle Sidebar").build(app)?;
+                    MenuItemBuilder::with_id("toggle_sidebar", "Toggle Left Side Panel")
+                        .build(app)?;
                 let toggle_vim =
                     MenuItemBuilder::with_id("toggle_vim", "Toggle Vim Mode").build(app)?;
                 let toggle_render =
-                    MenuItemBuilder::with_id("toggle_render", "Toggle Markdown Rendering")
-                        .build(app)?;
+                    MenuItemBuilder::with_id("toggle_render", "Cycle Render Mode").build(app)?;
 
                 let app_submenu = SubmenuBuilder::new(app, "Nib")
                     .about(None)

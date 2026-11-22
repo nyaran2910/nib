@@ -8,7 +8,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { readImageDataUrl, resolveImageSrc } from "../state/ipc";
+import { readImageDataUrl, resolveImageSrc, type RenderMode } from "../state/ipc";
 
 function getActiveLines(state: EditorState): Set<number> {
   const active = new Set<number>();
@@ -20,6 +20,266 @@ function getActiveLines(state: EditorState): Set<number> {
     }
   }
   return active;
+}
+
+const LATEX_SYMBOLS: Record<string, string> = {
+  alpha: "α",
+  beta: "β",
+  gamma: "γ",
+  delta: "δ",
+  epsilon: "ε",
+  varepsilon: "ε",
+  zeta: "ζ",
+  eta: "η",
+  theta: "θ",
+  vartheta: "ϑ",
+  iota: "ι",
+  kappa: "κ",
+  lambda: "λ",
+  mu: "μ",
+  nu: "ν",
+  xi: "ξ",
+  pi: "π",
+  rho: "ρ",
+  sigma: "σ",
+  tau: "τ",
+  upsilon: "υ",
+  phi: "φ",
+  varphi: "φ",
+  chi: "χ",
+  psi: "ψ",
+  omega: "ω",
+  Gamma: "Γ",
+  Delta: "Δ",
+  Theta: "Θ",
+  Lambda: "Λ",
+  Xi: "Ξ",
+  Pi: "Π",
+  Sigma: "Σ",
+  Phi: "Φ",
+  Psi: "Ψ",
+  Omega: "Ω",
+  pm: "±",
+  mp: "∓",
+  times: "×",
+  div: "÷",
+  cdot: "·",
+  ast: "∗",
+  star: "⋆",
+  le: "≤",
+  leq: "≤",
+  ge: "≥",
+  geq: "≥",
+  ne: "≠",
+  neq: "≠",
+  approx: "≈",
+  equiv: "≡",
+  sim: "∼",
+  propto: "∝",
+  to: "→",
+  rightarrow: "→",
+  leftarrow: "←",
+  leftrightarrow: "↔",
+  Rightarrow: "⇒",
+  Leftarrow: "⇐",
+  Leftrightarrow: "⇔",
+  iff: "⇔",
+  mapsto: "↦",
+  in: "∈",
+  notin: "∉",
+  ni: "∋",
+  subset: "⊂",
+  subseteq: "⊆",
+  supset: "⊃",
+  supseteq: "⊇",
+  cup: "∪",
+  cap: "∩",
+  emptyset: "∅",
+  varnothing: "∅",
+  forall: "∀",
+  exists: "∃",
+  neg: "¬",
+  land: "∧",
+  lor: "∨",
+  nabla: "∇",
+  partial: "∂",
+  infty: "∞",
+  sum: "∑",
+  prod: "∏",
+  int: "∫",
+  iint: "∬",
+  oint: "∮",
+  ldots: "…",
+  cdots: "⋯",
+  dots: "…",
+  degree: "°",
+  circ: "∘",
+  angle: "∠",
+  perp: "⊥",
+  parallel: "∥",
+  prime: "′",
+};
+
+function readBracedGroup(src: string, start: number): { content: string; next: number } {
+  let i = start;
+  while (i < src.length && src[i] === " ") i++;
+  if (i >= src.length) return { content: "", next: i };
+  if (src[i] !== "{") {
+    if (src[i] === "\\") {
+      const m = src.slice(i).match(/^\\[A-Za-z]+/);
+      if (m) return { content: m[0], next: i + m[0].length };
+    }
+    return { content: src[i], next: i + 1 };
+  }
+  let depth = 0;
+  let j = i;
+  while (j < src.length) {
+    if (src[j] === "{") depth++;
+    else if (src[j] === "}") {
+      depth--;
+      if (depth === 0) {
+        return { content: src.slice(i + 1, j), next: j + 1 };
+      }
+    }
+    j++;
+  }
+  return { content: src.slice(i + 1), next: src.length };
+}
+
+function appendLatexNodes(parent: HTMLElement, tex: string): void {
+  let i = 0;
+  let textBuf = "";
+  const flush = () => {
+    if (textBuf) {
+      parent.appendChild(document.createTextNode(textBuf));
+      textBuf = "";
+    }
+  };
+
+  while (i < tex.length) {
+    const ch = tex[i];
+    if (ch === "\\") {
+      const cmdMatch = tex.slice(i + 1).match(/^([A-Za-z]+|[^A-Za-z\s])/);
+      if (!cmdMatch) {
+        textBuf += ch;
+        i++;
+        continue;
+      }
+      const cmd = cmdMatch[1];
+      i += 1 + cmd.length;
+
+      if (cmd === "frac" || cmd === "dfrac" || cmd === "tfrac") {
+        flush();
+        const num = readBracedGroup(tex, i);
+        const den = readBracedGroup(tex, num.next);
+        i = den.next;
+        const frac = document.createElement("span");
+        frac.className = "cm-rm-math-frac";
+        const numEl = document.createElement("span");
+        numEl.className = "cm-rm-math-num";
+        appendLatexNodes(numEl, num.content);
+        const denEl = document.createElement("span");
+        denEl.className = "cm-rm-math-den";
+        appendLatexNodes(denEl, den.content);
+        frac.append(numEl, denEl);
+        parent.appendChild(frac);
+        continue;
+      }
+
+      if (cmd === "sqrt") {
+        flush();
+        const arg = readBracedGroup(tex, i);
+        i = arg.next;
+        const wrap = document.createElement("span");
+        wrap.className = "cm-rm-math-sqrt";
+        const rad = document.createElement("span");
+        rad.textContent = "√";
+        const body = document.createElement("span");
+        body.className = "cm-rm-math-sqrt-body";
+        appendLatexNodes(body, arg.content);
+        wrap.append(rad, body);
+        parent.appendChild(wrap);
+        continue;
+      }
+
+      if (cmd === "text" || cmd === "mathrm" || cmd === "operatorname") {
+        flush();
+        const arg = readBracedGroup(tex, i);
+        i = arg.next;
+        const span = document.createElement("span");
+        span.className = "cm-rm-math-rm";
+        span.textContent = arg.content;
+        parent.appendChild(span);
+        continue;
+      }
+
+      if (cmd === "mathbf" || cmd === "boldsymbol" || cmd === "mathbb") {
+        flush();
+        const arg = readBracedGroup(tex, i);
+        i = arg.next;
+        const span = document.createElement("span");
+        span.className = "cm-rm-math-bf";
+        appendLatexNodes(span, arg.content);
+        parent.appendChild(span);
+        continue;
+      }
+
+      if (cmd === "left" || cmd === "right") {
+        continue;
+      }
+      if (cmd === "," || cmd === ";" || cmd === ":" || cmd === "quad" || cmd === "qquad") {
+        textBuf += " ";
+        continue;
+      }
+      if (cmd === "{" || cmd === "}" || cmd === "%" || cmd === "_") {
+        textBuf += cmd;
+        continue;
+      }
+      if (cmd in LATEX_SYMBOLS) {
+        textBuf += LATEX_SYMBOLS[cmd];
+        continue;
+      }
+      textBuf += cmd;
+      continue;
+    }
+
+    if (ch === "^" || ch === "_") {
+      flush();
+      const grp = readBracedGroup(tex, i + 1);
+      i = grp.next;
+      const el = document.createElement(ch === "^" ? "sup" : "sub");
+      el.className = ch === "^" ? "cm-rm-math-sup" : "cm-rm-math-sub";
+      appendLatexNodes(el, grp.content);
+      parent.appendChild(el);
+      continue;
+    }
+
+    if (ch === "{" || ch === "}") {
+      i++;
+      continue;
+    }
+
+    textBuf += ch;
+    i++;
+  }
+  flush();
+}
+
+const CIRCLED_LEVELS = ["", "①", "②", "③", "④", "⑤", "⑥"];
+
+class HeadingBadgeWidget extends WidgetType {
+  constructor(readonly level: number) {
+    super();
+  }
+  eq(other: HeadingBadgeWidget): boolean {
+    return this.level === other.level;
+  }
+  toDOM(): HTMLElement {
+    const span = document.createElement("span");
+    span.className = `cm-rm-h-badge cm-rm-h-badge-${this.level}`;
+    span.textContent = CIRCLED_LEVELS[this.level] ?? `H${this.level}`;
+    return span;
+  }
 }
 
 class BulletWidget extends WidgetType {
@@ -86,6 +346,45 @@ class HrWidget extends WidgetType {
     const hr = document.createElement("span");
     hr.className = "cm-rm-hr";
     return hr;
+  }
+}
+
+class InlineMathWidget extends WidgetType {
+  constructor(
+    readonly tex: string,
+    readonly displayMode = false,
+  ) {
+    super();
+  }
+  eq(other: InlineMathWidget): boolean {
+    return this.tex === other.tex && this.displayMode === other.displayMode;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement("span");
+    el.className = this.displayMode ? "cm-rm-math-inline is-display" : "cm-rm-math-inline";
+    appendLatexNodes(el, this.tex.trim());
+    return el;
+  }
+}
+
+class BlockMathWidget extends WidgetType {
+  constructor(readonly tex: string) {
+    super();
+  }
+  eq(other: BlockMathWidget): boolean {
+    return this.tex === other.tex;
+  }
+  toDOM(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-rm-math-block";
+    const lines = this.tex.trim().split(/\r?\n/);
+    for (const line of lines) {
+      const row = document.createElement("div");
+      row.className = "cm-rm-math-block-row";
+      appendLatexNodes(row, line.trim());
+      wrap.appendChild(row);
+    }
+    return wrap;
   }
 }
 
@@ -162,15 +461,11 @@ class ImagePreviewWidget extends WidgetType {
   }
 }
 
-// Matches ![alt](path or url) including paths with spaces or optional "title"
 const IMAGE_REGEX = /!\[([^\]]*)\]\(([^)"\n]+?)(?:\s+"[^"]*")?\)/g;
 const INLINE_TAG_REGEX = /(^|\s)(#[A-Za-z0-9_\-/]+)/g;
+const DISPLAY_INLINE_MATH_REGEX = /\$\$([^$\n]+?)\$\$/g;
+const INLINE_MATH_REGEX = /(?<!\$)\$(?!\$|\s)([^$\n]+?)(?<!\s)\$(?!\$)/g;
 
-/**
- * Block-level inline image previews live in a StateField (required by CM6 for block widgets).
- * Images always render directly below their Markdown line (even while editing that line)
- * so pasted images appear immediately without having to move the cursor away.
- */
 function createImagePreviewField(
   getActiveFilePath: () => string | null,
   getRootDir: () => string | null,
@@ -209,10 +504,7 @@ function createImagePreviewField(
       return build(state);
     },
     update(decos, tr) {
-      if (tr.docChanged) {
-        return build(tr.state);
-      }
-      return decos;
+      return tr.docChanged ? build(tr.state) : decos;
     },
     provide: (f) => EditorView.decorations.from(f),
   });
@@ -248,13 +540,84 @@ function createHideFrontmatterField(): StateField<DecorationSet> {
   });
 }
 
-function buildInlineDecorations(view: EditorView): DecorationSet {
+/**
+ * Multi-line block math `$$\n...\n$$` rendered via a StateField (required for multi-line block replacements).
+ * Reveals raw LaTeX immediately when cursor enters any line inside the block.
+ */
+function createBlockMathField(): StateField<DecorationSet> {
+  const build = (state: EditorState): DecorationSet => {
+    const activeLines = getActiveLines(state);
+    const fmEnd = getFrontmatterEndLine(state);
+    const builder = new RangeSetBuilder<Decoration>();
+
+    let inCode = false;
+    let mathStartLine = -1;
+    let mathLines: string[] = [];
+
+    for (let ln = Math.max(1, fmEnd + 1); ln <= state.doc.lines; ln++) {
+      const line = state.doc.line(ln);
+      const trimmed = line.text.trim();
+
+      if (/^(`{3,}|~{3,})/.test(trimmed)) {
+        if (mathStartLine === -1) inCode = !inCode;
+        continue;
+      }
+      if (inCode) continue;
+
+      if (trimmed === "$$") {
+        if (mathStartLine === -1) {
+          mathStartLine = ln;
+          mathLines = [];
+        } else {
+          let isActive = false;
+          for (let k = mathStartLine; k <= ln; k++) {
+            if (activeLines.has(k)) {
+              isActive = true;
+              break;
+            }
+          }
+          if (!isActive && mathLines.length > 0) {
+            const from = state.doc.line(mathStartLine).from;
+            const to = line.to;
+            builder.add(
+              from,
+              to,
+              Decoration.replace({
+                widget: new BlockMathWidget(mathLines.join("\n")),
+                block: true,
+              }),
+            );
+          }
+          mathStartLine = -1;
+          mathLines = [];
+        }
+      } else if (mathStartLine !== -1) {
+        mathLines.push(line.text);
+      }
+    }
+
+    return builder.finish();
+  };
+
+  return StateField.define<DecorationSet>({
+    create(state) {
+      return build(state);
+    },
+    update(decos, tr) {
+      return tr.docChanged || tr.selection ? build(tr.state) : decos;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
+}
+
+function buildInlineDecorations(view: EditorView, mode: "rich" | "minimal"): DecorationSet {
   const { state } = view;
   const activeLines = getActiveLines(state);
   const fmEndLine = getFrontmatterEndLine(state);
   const items: Array<{ from: number; to: number; deco: Decoration }> = [];
   const styledLines = new Set<string>();
   const codeBlockLines = new Set<number>();
+  const minimal = mode === "minimal";
 
   const addLineClass = (lineFrom: number, cls: string) => {
     const key = `${lineFrom}:${cls}`;
@@ -297,16 +660,19 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
           return false;
         }
 
-        // Multi-line FencedCode block background & fence badges
+        // Multi-line FencedCode block: track code lines in both modes; style card in rich mode.
+        // Keep background on active lines too so visual selection never shifts or leaves holes.
         if (node.name === "FencedCode") {
           for (let ln = startLine.number; ln <= endLine.number; ln++) {
             codeBlockLines.add(ln);
-            if (activeLines.has(ln)) continue;
+            if (minimal) continue;
             const line = state.doc.line(ln);
             const classes = ["cm-rm-codeblock-line"];
             if (ln === startLine.number) classes.push("cm-rm-codeblock-start");
             if (ln === endLine.number) classes.push("cm-rm-codeblock-end");
             addLineClass(line.from, classes.join(" "));
+
+            if (activeLines.has(ln)) continue;
 
             if (ln === startLine.number) {
               const lang = line.text.trim().replace(/^`{3,}|^~{3,}/, "").trim();
@@ -326,8 +692,17 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
           return false;
         }
 
-        // Blockquotes
-        if (node.name === "Blockquote") {
+        // Tables (rendered in both rich & minimal)
+        if (node.name === "Table") {
+          for (let ln = startLine.number; ln <= endLine.number; ln++) {
+            const line = state.doc.line(ln);
+            addLineClass(line.from, "cm-rm-table-line");
+          }
+          return;
+        }
+
+        // Blockquotes (rich mode only)
+        if (!minimal && node.name === "Blockquote") {
           for (let ln = startLine.number; ln <= endLine.number; ln++) {
             if (activeLines.has(ln)) continue;
             const line = state.doc.line(ln);
@@ -336,20 +711,10 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
           return;
         }
 
-        // Tables
-        if (node.name === "Table") {
-          for (let ln = startLine.number; ln <= endLine.number; ln++) {
-            if (activeLines.has(ln)) continue;
-            const line = state.doc.line(ln);
-            addLineClass(line.from, "cm-rm-table-line");
-          }
-          return;
-        }
-
-        // Skip single-line decorations when cursor is on that line (render-markdown.nvim style)
+        // Active cursor line stays raw Markdown
         if (activeLines.has(startLine.number)) return;
 
-        // Hide raw ![alt](url) markdown syntax on inactive lines since the image widget renders below
+        // Hide raw ![alt](url) markdown syntax on inactive lines (both rich & minimal)
         if (node.name === "Image") {
           items.push({ from: node.from, to: node.to, deco: Decoration.replace({}) });
           return false;
@@ -357,29 +722,33 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 
         // ATX Headings
         if (node.name.startsWith("ATXHeading")) {
-          const level = node.name.slice("ATXHeading".length);
-          addLineClass(startLine.from, `cm-rm-h${level}`);
+          const levelNum = Number(node.name.slice("ATXHeading".length)) || 1;
+          addLineClass(startLine.from, minimal ? `cm-rm-min-h${levelNum}` : `cm-rm-h${levelNum}`);
           const text = state.doc.sliceString(node.from, node.to);
           const match = text.match(/^(#{1,6}\s+)/);
           if (match) {
             items.push({
               from: node.from,
               to: node.from + match[1].length,
-              deco: Decoration.replace({}),
+              deco: minimal
+                ? Decoration.replace({ widget: new HeadingBadgeWidget(levelNum) })
+                : Decoration.replace({}),
             });
           }
           return;
         }
 
-        // Quote marker `> `
-        if (node.name === "QuoteMark") {
-          const after = state.doc.sliceString(node.to, node.to + 1);
-          const end = after === " " ? node.to + 1 : node.to;
-          items.push({ from: node.from, to: end, deco: Decoration.replace({}) });
+        // Horizontal rule `---` (both rich & minimal)
+        if (node.name === "HorizontalRule") {
+          items.push({
+            from: node.from,
+            to: node.to,
+            deco: Decoration.replace({ widget: new HrWidget() }),
+          });
           return;
         }
 
-        // Task list checkbox `[ ]` / `[x]`
+        // Task list checkbox `[ ]` / `[x]` (both rich & minimal)
         if (node.name === "TaskMarker") {
           const raw = state.doc.sliceString(node.from, node.to);
           const checked = /\[[xX]\]/.test(raw);
@@ -398,7 +767,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
           return;
         }
 
-        // Bullet list marker `-`, `*`, `+` (skip if followed by TaskMarker)
+        // ListMark before TaskMarker (hide `- ` in both modes so checkbox aligns cleanly)
         if (node.name === "ListMark") {
           const marker = state.doc.sliceString(node.from, node.to);
           if (marker === "-" || marker === "*" || marker === "+") {
@@ -409,7 +778,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
                 to: Math.min(startLine.to, node.to + 1),
                 deco: Decoration.replace({}),
               });
-            } else {
+            } else if (!minimal) {
               items.push({
                 from: node.from,
                 to: node.to,
@@ -420,13 +789,14 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
           return;
         }
 
-        // Horizontal rule
-        if (node.name === "HorizontalRule") {
-          items.push({
-            from: node.from,
-            to: node.to,
-            deco: Decoration.replace({ widget: new HrWidget() }),
-          });
+        // Remaining decorations are Rich-mode only
+        if (minimal) return;
+
+        // Quote marker `> `
+        if (node.name === "QuoteMark") {
+          const after = state.doc.sliceString(node.to, node.to + 1);
+          const end = after === " " ? node.to + 1 : node.to;
+          items.push({ from: node.from, to: end, deco: Decoration.replace({}) });
           return;
         }
 
@@ -489,27 +859,61 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
       },
     });
 
-    // Subtle inline #tag pills on visible non-code, non-active lines
+    // Inline math (`$...$` & single-line `$$...$$`) in both rich & minimal, plus `#tags` in rich mode
     const firstLine = state.doc.lineAt(from).number;
     const lastLine = state.doc.lineAt(to).number;
     for (let ln = firstLine; ln <= lastLine; ln++) {
       if (activeLines.has(ln) || codeBlockLines.has(ln)) continue;
       const line = state.doc.line(ln);
-      if (line.text.startsWith("#")) continue; // Skip ATX headings
-      INLINE_TAG_REGEX.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = INLINE_TAG_REGEX.exec(line.text)) !== null) {
-        const prefixLen = m[1]?.length ?? 0;
-        const tagText = m[2] ?? "";
-        const raw = tagText.slice(1);
-        if ((raw.length === 3 || raw.length === 6) && /^[0-9a-fA-F]+$/.test(raw)) continue;
-        const tagFrom = line.from + m.index + prefixLen;
-        const tagTo = tagFrom + tagText.length;
+
+      // Skip fenced math delimiters `$$` (handled by BlockMathField)
+      if (line.text.trim() === "$$") continue;
+
+      const mathSpans: Array<[number, number]> = [];
+      DISPLAY_INLINE_MATH_REGEX.lastIndex = 0;
+      let dm: RegExpExecArray | null;
+      while ((dm = DISPLAY_INLINE_MATH_REGEX.exec(line.text)) !== null) {
+        const mFrom = line.from + dm.index;
+        const mTo = mFrom + dm[0].length;
+        mathSpans.push([mFrom, mTo]);
         items.push({
-          from: tagFrom,
-          to: tagTo,
-          deco: Decoration.mark({ class: "cm-rm-tag" }),
+          from: mFrom,
+          to: mTo,
+          deco: Decoration.replace({ widget: new InlineMathWidget(dm[1] ?? "", true) }),
         });
+      }
+
+      INLINE_MATH_REGEX.lastIndex = 0;
+      let im: RegExpExecArray | null;
+      while ((im = INLINE_MATH_REGEX.exec(line.text)) !== null) {
+        const mFrom = line.from + im.index;
+        const mTo = mFrom + im[0].length;
+        if (mathSpans.some(([a, b]) => mFrom < b && mTo > a)) continue;
+        mathSpans.push([mFrom, mTo]);
+        items.push({
+          from: mFrom,
+          to: mTo,
+          deco: Decoration.replace({ widget: new InlineMathWidget(im[1] ?? "", false) }),
+        });
+      }
+
+      if (!minimal && !line.text.startsWith("#")) {
+        INLINE_TAG_REGEX.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = INLINE_TAG_REGEX.exec(line.text)) !== null) {
+          const prefixLen = m[1]?.length ?? 0;
+          const tagText = m[2] ?? "";
+          const raw = tagText.slice(1);
+          if ((raw.length === 3 || raw.length === 6) && /^[0-9a-fA-F]+$/.test(raw)) continue;
+          const tagFrom = line.from + m.index + prefixLen;
+          const tagTo = tagFrom + tagText.length;
+          if (mathSpans.some(([a, b]) => tagFrom < b && tagTo > a)) continue;
+          items.push({
+            from: tagFrom,
+            to: tagTo,
+            deco: Decoration.mark({ class: "cm-rm-tag" }),
+          });
+        }
       }
     }
   }
@@ -523,31 +927,45 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 }
 
 /**
- * Lightweight `render-markdown.nvim`-inspired CodeMirror 6 extension.
- * Keeps the active cursor line in raw Markdown while cleanly rendering all other lines,
- * and displays inline image previews immediately.
+ * 3-mode Markdown renderer for CodeMirror 6:
+ * - `"rich"`    : Obsidian-style rich inline rendering with constant non-heading line height
+ * - `"minimal"` : render-markdown.nvim minimal style (1em colored headings + badge, tables, HR, math, tasks, images)
+ * - `"raw"`     : pure syntax-highlighted Markdown source
  */
 export function createRenderMarkdownExtension(
   getActiveFilePath: () => string | null,
   getRootDir: () => string | null = () => null,
+  renderMode: RenderMode | string = "rich",
   showFrontmatterInEditor = true,
 ): Extension {
+  const mode: RenderMode =
+    renderMode === "minimal" || renderMode === "raw" ? renderMode : "rich";
+
+  if (mode === "raw") {
+    return showFrontmatterInEditor ? [] : [createHideFrontmatterField()];
+  }
+
+  const activeMode: "rich" | "minimal" = mode;
   const inlinePlugin = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = buildInlineDecorations(view);
+        this.decorations = buildInlineDecorations(view, activeMode);
       }
       update(update: ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged) {
-          this.decorations = buildInlineDecorations(update.view);
+          this.decorations = buildInlineDecorations(update.view, activeMode);
         }
       }
     },
     { decorations: (v) => v.decorations },
   );
 
-  const exts: Extension[] = [inlinePlugin, createImagePreviewField(getActiveFilePath, getRootDir)];
+  const exts: Extension[] = [
+    inlinePlugin,
+    createBlockMathField(),
+    createImagePreviewField(getActiveFilePath, getRootDir),
+  ];
   if (!showFrontmatterInEditor) {
     exts.push(createHideFrontmatterField());
   }

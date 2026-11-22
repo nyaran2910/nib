@@ -1,9 +1,9 @@
 import { createEffect, onCleanup, onMount } from "solid-js";
 import { createNibEditor, type NibEditorController } from "../editor/createEditor";
 import { pluginRegistry } from "../plugins/registry";
-import type { PaneTab, WindowStore } from "../state/store";
+import type { ContainerTab, WindowStore } from "../state/store";
 
-export function EditorView(props: { store: WindowStore; tab: () => PaneTab }) {
+export function EditorView(props: { store: WindowStore; tab: () => ContainerTab }) {
   let hostRef: HTMLDivElement | undefined;
   let controller: NibEditorController | undefined;
 
@@ -45,7 +45,7 @@ export function EditorView(props: { store: WindowStore; tab: () => PaneTab }) {
     });
   });
 
-  // Sync tab switch or external content updates (e.g. PropertiesPanel frontmatter edit)
+  // Sync container switch or external content updates (e.g. PropertiesPanel frontmatter edit)
   let lastTabId = props.tab().id;
   let lastLoadVersion = props.store.fileLoadVersion();
   createEffect(() => {
@@ -79,8 +79,7 @@ export function EditorView(props: { store: WindowStore; tab: () => PaneTab }) {
       class="nib-editor-container"
       onMouseDown={() => {
         const t = props.tab();
-        props.store.setFocusedZone(t.zone);
-        void props.store.selectPane(t.id, false);
+        void props.store.selectContainer(t.id, false);
       }}
     >
       <div class="nib-cm-host" ref={hostRef} />

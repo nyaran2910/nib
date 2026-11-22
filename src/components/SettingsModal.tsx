@@ -18,7 +18,7 @@ type SectionId = "general" | "ui" | "editor" | "explorer" | "storage" | "hotkeys
 const SECTIONS: Array<{ id: SectionId; label: string; keywords: string }> = [
   { id: "general", label: "General", keywords: "general theme light dark system startup empty last tab directory" },
   { id: "ui", label: "UI", keywords: "ui tabbar topbar statusbar sidebar search render vim window settings visibility" },
-  { id: "editor", label: "Editor", keywords: "editor vim frontmatter properties font size line numbers auto save" },
+  { id: "editor", label: "Editor", keywords: "editor vim render rich minimal raw frontmatter properties font size line numbers relative absolute width centered full auto save" },
   { id: "explorer", label: "Explorer", keywords: "explorer keymap vim emacs" },
   { id: "storage", label: "Images", keywords: "image storage folder webp quality cloudflare r2 bucket key trash" },
   { id: "hotkeys", label: "Hotkeys", keywords: "keybinding hotkey shortcut command" },
@@ -650,6 +650,65 @@ export function SettingsModal(props: { store: WindowStore }) {
                 <section class="nib-settings-section">
                   <div
                     data-setting-row
+                    class={`nib-setting-row ${rowMatches("render mode rich minimal raw markdown") ? "is-search-match" : ""}`}
+                  >
+                    <span>Render mode</span>
+                    <select
+                      class="nib-input"
+                      value={draft().editor.render_mode}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          editor: { ...p.editor, render_mode: e.currentTarget.value },
+                        }))
+                      }
+                    >
+                      <option value="rich">Rich</option>
+                      <option value="minimal">Minimal</option>
+                      <option value="raw">Raw</option>
+                    </select>
+                  </div>
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("editor width centered full page") ? "is-search-match" : ""}`}
+                  >
+                    <span>Editor width</span>
+                    <select
+                      class="nib-input"
+                      value={draft().editor.editor_width}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          editor: { ...p.editor, editor_width: e.currentTarget.value },
+                        }))
+                      }
+                    >
+                      <option value="centered">Centered</option>
+                      <option value="full">Full width</option>
+                    </select>
+                  </div>
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("line numbers relative absolute off") ? "is-search-match" : ""}`}
+                  >
+                    <span>Line numbers</span>
+                    <select
+                      class="nib-input"
+                      value={draft().editor.line_number_mode}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          editor: { ...p.editor, line_number_mode: e.currentTarget.value },
+                        }))
+                      }
+                    >
+                      <option value="relative">Relative</option>
+                      <option value="absolute">Absolute</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </div>
+                  <div
+                    data-setting-row
                     class={`nib-setting-row ${rowMatches("vim mode") ? "is-search-match" : ""}`}
                   >
                     <span>Vim mode</span>
@@ -696,22 +755,6 @@ export function SettingsModal(props: { store: WindowStore }) {
                         setDraft((p) => ({
                           ...p,
                           editor: { ...p.editor, show_frontmatter_in_editor: e.currentTarget.checked },
-                        }))
-                      }
-                    />
-                  </div>
-                  <div
-                    data-setting-row
-                    class={`nib-setting-row ${rowMatches("line numbers") ? "is-search-match" : ""}`}
-                  >
-                    <span>Line numbers</span>
-                    <input
-                      type="checkbox"
-                      checked={draft().editor.line_numbers}
-                      onChange={(e) =>
-                        setDraft((p) => ({
-                          ...p,
-                          editor: { ...p.editor, line_numbers: e.currentTarget.checked },
                         }))
                       }
                     />

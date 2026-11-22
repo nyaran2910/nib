@@ -1,4 +1,5 @@
 import {
+  Columns2,
   Command,
   CopyPlus,
   Files,
@@ -11,28 +12,41 @@ import {
   Terminal,
   X,
 } from "lucide-solid";
-import { For, Show, createMemo, createSignal } from "solid-js";
-import type { DockZone, PaneTab, WindowStore } from "../state/store";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import type { ContainerTab, PaneNode, PanelId, WindowStore } from "../state/store";
 import { EditorView } from "./EditorView";
 import { ExplorerPane } from "./ExplorerPane";
 import { PropertiesPanel } from "./PropertiesPanel";
 
-export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
+function PaneView(props: {
+  store: WindowStore;
+  pane: PaneNode;
+  paneIndex: number;
+  totalPanes: number;
+}) {
+  let emptyPaneRef: HTMLDivElement | undefined;
   const [dragOver, setDragOver] = createSignal(false);
 
-  const tabs = createMemo(() => props.store.zonePanes(props.zone));
-  const activeTab = createMemo<PaneTab | undefined>(() => {
-    const list = tabs();
-    const activeId = props.store.activeByZone()[props.zone];
-    return list.find((t) => t.id === activeId) ?? list[0];
+  const tabs = createMemo(() => props.store.containersInPane(props.pane.id));
+  const activeTab = createMemo<ContainerTab | undefined>(() =>
+    props.store.activeContainerInPane(props.pane.id),
+  );
+  const isPaneFocused = () => props.store.activePaneId() === props.pane.id;
+  const ui = () => props.store.config().ui;
+  const panel = () => props.pane.panel;
+  const showHeader = () => (panel() === "center" ? ui().show_topbar : true);
+  const needsTrafficLightPad = () =>
+    props.paneIndex === 0 &&
+    (panel() === "left" || (panel() === "center" && !props.store.isPanelVisible("left")));
+
+  createEffect(() => {
+    if (isPaneFocused() && !activeTab()) {
+      queueMicrotask(() => emptyPaneRef?.focus());
+    }
   });
 
-  const isZoneFocused = () => props.store.focusedZone() === props.zone;
-  const ui = () => props.store.config().ui;
-  const showHeader = () => (props.zone === "center" ? ui().show_topbar : true);
-
   const handleDragOver = (e: DragEvent) => {
-    if (!props.store.draggingTabId()) return;
+    if (!props.store.draggingContainerId()) return;
     e.preventDefault();
     setDragOver(true);
   };
@@ -40,41 +54,41 @@ export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const id = props.store.draggingTabId() ?? e.dataTransfer?.getData("text/nib-tab");
+    const id = props.store.draggingContainerId() ?? e.dataTransfer?.getData("text/nib-tab");
     if (id) {
-      props.store.moveTabToZone(id, props.zone);
-      props.store.setDraggingTabId(null);
+      props.store.moveContainerToPane(id, props.pane.id);
+      props.store.setDraggingContainerId(null);
     }
   };
 
-  const renderNonEditorIcon = (kind: PaneTab["kind"]) => {
+  const renderNonEditorIcon = (kind: ContainerTab["kind"]) => {
     if (kind === "explorer") return <Files size={15} />;
     return <SlidersHorizontal size={15} />;
   };
 
   return (
-    <section
-      class={`nib-dock nib-dock-${props.zone} ${isZoneFocused() ? "is-zone-focused" : ""} ${dragOver() ? "is-drag-over" : ""}`}
-      style={
-        props.zone === "left" || props.zone === "right"
-          ? { width: `${props.store.config().appearance.sidebar_width}px` }
-          : undefined
-      }
+    <div
+      class={`nib-pane ${isPaneFocused() ? "is-pane-focused" : ""} ${dragOver() ? "is-drag-over" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
-      onMouseDown={() => props.store.setFocusedZone(props.zone)}
+      onMouseDown={() => props.store.focusPane(props.pane.id)}
     >
       <Show when={showHeader()}>
         <header
-          class={`nib-dock-header ${props.zone === "left" ? "is-left-chrome" : ""} ${props.zone === "center" && !props.store.isZoneVisible("left") ? "is-left-chrome" : ""}`}
-          data-tauri-drag-region={props.zone === "left" || props.zone === "center" ? "" : undefined}
+          class={`nib-dock-header ${needsTrafficLightPad() ? "is-left-chrome" : ""}`}
+          data-tauri-drag-region={
+            props.paneIndex === 0 && (panel() === "left" || panel() === "center") ? "" : undefined
+          }
         >
-          <Show when={props.zone === "center"}>
+          <Show when={panel() === "center" && props.paneIndex === 0}>
             <button
               class="nib-icon-btn"
-              title="Toggle Left Panel"
-              onClick={() => void props.store.toggleSidebar()}
+              title="Toggle Left Side Panel"
+              onClick={(e) => {
+                e.stopPropagation();
+                void props.store.togglePanelVisibility("left");
+              }}
             >
               <PanelLeft size={15} />
             </button>
@@ -91,24 +105,25 @@ export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
                     aria-selected={isActive()}
                     draggable={true}
                     onDragStart={(e) => {
-                      props.store.setDraggingTabId(tab.id);
+                      props.store.setDraggingContainerId(tab.id);
                       e.dataTransfer?.setData("text/nib-tab", tab.id);
                     }}
-                    onDragEnd={() => props.store.setDraggingTabId(null)}
+                    onDragEnd={() => props.store.setDraggingContainerId(null)}
                     class={`nib-tab ${isEditor() ? "nib-tab-editor" : "nib-tab-icon-only"} ${isActive() ? "is-active" : ""}`}
-                    onClick={() => void props.store.selectPane(tab.id, true)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void props.store.selectContainer(tab.id, true);
+                    }}
                     onMouseDown={(e) => {
                       if (e.button === 1 && isEditor()) {
                         e.preventDefault();
+                        e.stopPropagation();
                         void props.store.closeTab(tab.id);
                       }
                     }}
                     title={tab.path ?? tab.title}
                   >
-                    <Show
-                      when={isEditor()}
-                      fallback={renderNonEditorIcon(tab.kind)}
-                    >
+                    <Show when={isEditor()} fallback={renderNonEditorIcon(tab.kind)}>
                       <span class="nib-tab-title">{tab.title}</span>
                       <Show when={tab.dirty}>
                         <span class="nib-dirty-dot" />
@@ -129,13 +144,41 @@ export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
               }}
             </For>
 
-            <Show when={props.zone === "center"}>
+            <Show when={panel() === "center" || tabs().length === 0}>
               <button
                 class="nib-icon-btn nib-tab-new"
                 title="New Tab"
-                onClick={() => props.store.openEmptyTab("center")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.store.openEmptyTab(props.pane.id);
+                }}
               >
                 <Plus size={14} />
+              </button>
+            </Show>
+          </div>
+
+          <div class="nib-pane-actions">
+            <button
+              class="nib-icon-btn"
+              title="Split Pane"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.store.splitPane(props.pane.id);
+              }}
+            >
+              <Columns2 size={14} />
+            </button>
+            <Show when={props.totalPanes > 1}>
+              <button
+                class="nib-icon-btn"
+                title="Close Pane"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void props.store.closePane(props.pane.id);
+                }}
+              >
+                <X size={14} />
               </button>
             </Show>
           </div>
@@ -143,16 +186,38 @@ export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
       </Show>
 
       <div class="nib-dock-body">
-        <Show when={activeTab()}>
+        <Show
+          when={activeTab()}
+          fallback={
+            <div
+              ref={emptyPaneRef}
+              class="nib-empty-pane"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  props.store.focusMainPanel();
+                }
+              }}
+            >
+              <button
+                class="nib-secondary-btn"
+                onClick={() => props.store.openEmptyTab(props.pane.id)}
+              >
+                New Tab
+              </button>
+            </div>
+          }
+        >
           {(tab) => (
             <Show
               when={tab().kind === "editor"}
               fallback={
                 <Show
                   when={tab().kind === "explorer"}
-                  fallback={<PropertiesPanel store={props.store} zone={props.zone} />}
+                  fallback={<PropertiesPanel store={props.store} paneId={props.pane.id} />}
                 >
-                  <ExplorerPane store={props.store} zone={props.zone} />
+                  <ExplorerPane store={props.store} paneId={props.pane.id} />
                 </Show>
               }
             >
@@ -161,9 +226,42 @@ export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
           )}
         </Show>
       </div>
+    </div>
+  );
+}
 
-      {/* Obsidian-style bottom utility rail in left panel */}
-      <Show when={props.zone === "left"}>
+export function DockPanel(props: { store: WindowStore; panel: PanelId }) {
+  const panes = createMemo(() => props.store.panesInPanel(props.panel));
+  const isPanelFocused = () => props.store.focusedPanel() === props.panel;
+  const ui = () => props.store.config().ui;
+  const renderMode = () => props.store.config().editor.render_mode;
+
+  return (
+    <section
+      class={`nib-dock nib-dock-${props.panel} ${isPanelFocused() ? "is-zone-focused" : ""}`}
+      style={
+        props.panel === "left" || props.panel === "right"
+          ? { width: `${props.store.config().appearance.sidebar_width}px` }
+          : undefined
+      }
+    >
+      <div
+        class={`nib-panel-panes ${props.panel === "left" || props.panel === "right" ? "is-vertical" : "is-horizontal"}`}
+      >
+        <For each={panes()}>
+          {(pane, idx) => (
+            <PaneView
+              store={props.store}
+              pane={pane}
+              paneIndex={idx()}
+              totalPanes={panes().length}
+            />
+          )}
+        </For>
+      </div>
+
+      {/* Obsidian-style bottom utility rail in Left Side Panel */}
+      <Show when={props.panel === "left"}>
         <div class="nib-sidebar-footer">
           <div class="nib-sidebar-footer-group">
             <Show when={ui().show_topbar_search}>
@@ -198,9 +296,9 @@ export function DockPanel(props: { store: WindowStore; zone: DockZone }) {
           <div class="nib-sidebar-footer-group">
             <Show when={ui().show_topbar_render_toggle}>
               <button
-                class={`nib-icon-btn ${props.store.config().editor.render_markdown ? "is-accent" : ""}`}
-                title="Markdown Render"
-                onClick={() => void props.store.toggleRenderMarkdown()}
+                class={`nib-icon-btn ${renderMode() !== "raw" ? "is-accent" : ""}`}
+                title={`Render: ${renderMode()}`}
+                onClick={() => void props.store.cycleRenderMode()}
               >
                 <Sparkles size={15} />
               </button>

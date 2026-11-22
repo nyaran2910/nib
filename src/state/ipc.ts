@@ -4,16 +4,21 @@ import { confirm, open } from "@tauri-apps/plugin-dialog";
 
 export type SearchMode = "omni" | "files" | "content" | "tags";
 
+export type RenderMode = "rich" | "minimal" | "raw";
+export type LineNumberMode = "relative" | "absolute" | "off";
+export type EditorWidthMode = "centered" | "full";
+
 export interface EditorConfig {
   vim_mode: boolean;
-  render_markdown: boolean;
+  render_mode: RenderMode | string;
+  line_number_mode: LineNumberMode | string;
+  editor_width: EditorWidthMode | string;
   font_family: string;
   mono_font_family: string;
   font_size: number;
   line_height: number;
   tab_size: number;
   yank_highlight_ms: number;
-  line_numbers: boolean;
   auto_save_ms: number;
   show_frontmatter_in_editor: boolean;
 }
@@ -127,14 +132,15 @@ export const DEFAULT_CONFIG: AppConfig = {
   startup_behavior: "empty",
   editor: {
     vim_mode: true,
-    render_markdown: true,
+    render_mode: "rich",
+    line_number_mode: "relative",
+    editor_width: "centered",
     font_family: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif",
     mono_font_family: "'SF Mono', ui-monospace, Menlo, Monaco, monospace",
     font_size: 16,
     line_height: 1.7,
     tab_size: 2,
     yank_highlight_ms: 220,
-    line_numbers: false,
     auto_save_ms: 1200,
     show_frontmatter_in_editor: true,
   },
@@ -165,11 +171,11 @@ export const DEFAULT_CONFIG: AppConfig = {
     "nib:prev-tab": "Mod-Shift-[",
     "nib:new-window": "Mod-Shift-n",
     "nib:open-folder": "Mod-o",
-    "nib:toggle-sidebar": "Mod-Shift-s",
-    "nib:focus-explorer": "Mod-Ctrl-1",
-    "nib:focus-properties": "Mod-Ctrl-2",
+    "nib:toggle-left-panel": "Mod-Shift-s",
+    "nib:toggle-right-panel": "Mod-Shift-.",
+    "nib:toggle-bottom-panel": "Mod-Shift-b",
     "nib:toggle-vim": "Mod-Shift-v",
-    "nib:toggle-render-markdown": "Mod-Shift-m",
+    "nib:cycle-render-mode": "Mod-Shift-m",
     "nib:open-settings": "Mod-,",
     "nib:command-palette": "Mod-Shift-p",
     "nib:search-omni": "Mod-k",

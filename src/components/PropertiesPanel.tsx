@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-solid";
 import { For, createEffect, createMemo, createSignal } from "solid-js";
-import type { DockZone, WindowStore } from "../state/store";
+import type { WindowStore } from "../state/store";
 
 interface FrontmatterEntry {
   key: string;
@@ -46,14 +46,18 @@ function serializeFrontmatter(entries: FrontmatterEntry[], body: string): string
   return `---\n${yaml}\n---\n${body}`;
 }
 
-export function PropertiesPanel(props: { store: WindowStore; zone: DockZone }) {
+export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
   let containerRef: HTMLDivElement | undefined;
   const [newKey, setNewKey] = createSignal("");
   const [newVal, setNewVal] = createSignal("");
   const [activeIdx, setActiveIdx] = createSignal(0);
 
-  const isFocused = () =>
-    props.store.focusedZone() === props.zone && props.store.focusArea() === "properties";
+  const isFocused = () => {
+    if (props.store.activePaneId() !== props.paneId) return false;
+    const panel = props.store.panelOfPane(props.paneId);
+    if (!props.store.isPanelVisible(panel)) return false;
+    return props.store.activeContainerInPane(props.paneId)?.kind === "properties";
+  };
 
   const parsed = createMemo(() => parseFrontmatter(props.store.content()));
 
@@ -95,7 +99,7 @@ export function PropertiesPanel(props: { store: WindowStore; zone: DockZone }) {
         target?.blur();
         containerRef?.focus();
       } else {
-        props.store.focusEditor();
+        props.store.focusMainPanel();
       }
       return;
     }
@@ -111,7 +115,7 @@ export function PropertiesPanel(props: { store: WindowStore; zone: DockZone }) {
       setActiveIdx((i) => (i - 1 + len) % len);
     } else if (e.ctrlKey && e.key === "g") {
       e.preventDefault();
-      props.store.focusEditor();
+      props.store.focusMainPanel();
     }
   };
 
@@ -120,7 +124,7 @@ export function PropertiesPanel(props: { store: WindowStore; zone: DockZone }) {
       ref={containerRef}
       class="nib-properties-panel"
       tabIndex={0}
-      onFocus={() => props.store.setFocusedZone(props.zone)}
+      onFocus={() => props.store.focusPane(props.paneId)}
       onKeyDown={handleKeyDown}
     >
       <div class="nib-prop-list">

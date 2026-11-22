@@ -23,17 +23,21 @@ pub struct AppConfig {
 #[serde(default)]
 pub struct EditorConfig {
     pub vim_mode: bool,
-    pub render_markdown: bool,
+    /// "rich" (Obsidian) | "minimal" (render-markdown minimal) | "raw" (source)
+    pub render_mode: String,
+    /// "relative" (Neovim hybrid) | "absolute" | "off"
+    pub line_number_mode: String,
+    /// "centered" (readable column) | "full" (Notion full-page)
+    pub editor_width: String,
     pub font_family: String,
     pub mono_font_family: String,
     pub font_size: u16,
     pub line_height: f64,
     pub tab_size: u8,
     pub yank_highlight_ms: u64,
-    pub line_numbers: bool,
     /// Debounced auto-save interval in ms (0 disables auto-save)
     pub auto_save_ms: u64,
-    /// Show raw YAML frontmatter (--- ... ---) in the editor body vs Properties panel only
+    /// Show raw YAML frontmatter (--- ... ---) in the editor body vs Properties container only
     pub show_frontmatter_in_editor: bool,
 }
 
@@ -114,12 +118,13 @@ pub struct FolderConfigOverride {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EditorConfigOverride {
     pub vim_mode: Option<bool>,
-    pub render_markdown: Option<bool>,
+    pub render_mode: Option<String>,
+    pub line_number_mode: Option<String>,
+    pub editor_width: Option<String>,
     pub font_size: Option<u16>,
     pub line_height: Option<f64>,
     pub tab_size: Option<u8>,
     pub yank_highlight_ms: Option<u64>,
-    pub line_numbers: Option<bool>,
     pub auto_save_ms: Option<u64>,
     pub show_frontmatter_in_editor: Option<bool>,
 }
@@ -150,7 +155,9 @@ impl Default for EditorConfig {
     fn default() -> Self {
         Self {
             vim_mode: true,
-            render_markdown: true,
+            render_mode: "rich".to_string(),
+            line_number_mode: "relative".to_string(),
+            editor_width: "centered".to_string(),
             font_family:
                 "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif"
                     .to_string(),
@@ -159,7 +166,6 @@ impl Default for EditorConfig {
             line_height: 1.7,
             tab_size: 2,
             yank_highlight_ms: 220,
-            line_numbers: false,
             auto_save_ms: 1200,
             show_frontmatter_in_editor: true,
         }
@@ -226,11 +232,11 @@ impl Default for AppConfig {
         keybindings.insert("nib:prev-tab".into(), "Mod-Shift-[".into());
         keybindings.insert("nib:new-window".into(), "Mod-Shift-n".into());
         keybindings.insert("nib:open-folder".into(), "Mod-o".into());
-        keybindings.insert("nib:toggle-sidebar".into(), "Mod-Shift-s".into());
-        keybindings.insert("nib:focus-explorer".into(), "Mod-Ctrl-1".into());
-        keybindings.insert("nib:focus-properties".into(), "Mod-Ctrl-2".into());
+        keybindings.insert("nib:toggle-left-panel".into(), "Mod-Shift-s".into());
+        keybindings.insert("nib:toggle-right-panel".into(), "Mod-Shift-.".into());
+        keybindings.insert("nib:toggle-bottom-panel".into(), "Mod-Shift-b".into());
         keybindings.insert("nib:toggle-vim".into(), "Mod-Shift-v".into());
-        keybindings.insert("nib:toggle-render-markdown".into(), "Mod-Shift-m".into());
+        keybindings.insert("nib:cycle-render-mode".into(), "Mod-Shift-m".into());
         keybindings.insert("nib:open-settings".into(), "Mod-,".into());
         keybindings.insert("nib:command-palette".into(), "Mod-Shift-p".into());
         keybindings.insert("nib:search-omni".into(), "Mod-k".into());
@@ -425,8 +431,14 @@ fn apply_override(base: &mut AppConfig, ov: FolderConfigOverride) {
         if let Some(v) = ed.vim_mode {
             base.editor.vim_mode = v;
         }
-        if let Some(v) = ed.render_markdown {
-            base.editor.render_markdown = v;
+        if let Some(v) = ed.render_mode {
+            base.editor.render_mode = v;
+        }
+        if let Some(v) = ed.line_number_mode {
+            base.editor.line_number_mode = v;
+        }
+        if let Some(v) = ed.editor_width {
+            base.editor.editor_width = v;
         }
         if let Some(v) = ed.font_size {
             base.editor.font_size = v;
@@ -439,9 +451,6 @@ fn apply_override(base: &mut AppConfig, ov: FolderConfigOverride) {
         }
         if let Some(v) = ed.yank_highlight_ms {
             base.editor.yank_highlight_ms = v;
-        }
-        if let Some(v) = ed.line_numbers {
-            base.editor.line_numbers = v;
         }
         if let Some(v) = ed.auto_save_ms {
             base.editor.auto_save_ms = v;
@@ -477,9 +486,12 @@ mod tests {
         assert!(cfg.storage.auto_convert_webp);
         assert_eq!(cfg.keybindings.get("nib:search-omni").map(String::as_str), Some("Mod-k"));
         assert_eq!(cfg.keybindings.get("nib:command-palette").map(String::as_str), Some("Mod-Shift-p"));
-        assert_eq!(cfg.keybindings.get("nib:toggle-sidebar").map(String::as_str), Some("Mod-Shift-s"));
-        assert_eq!(cfg.keybindings.get("nib:focus-explorer").map(String::as_str), Some("Mod-Ctrl-1"));
-        assert_eq!(cfg.keybindings.get("nib:focus-properties").map(String::as_str), Some("Mod-Ctrl-2"));
+        assert_eq!(cfg.keybindings.get("nib:toggle-left-panel").map(String::as_str), Some("Mod-Shift-s"));
+        assert_eq!(cfg.keybindings.get("nib:toggle-right-panel").map(String::as_str), Some("Mod-Shift-."));
+        assert_eq!(cfg.keybindings.get("nib:toggle-bottom-panel").map(String::as_str), Some("Mod-Shift-b"));
+        assert_eq!(cfg.editor.render_mode, "rich");
+        assert_eq!(cfg.editor.line_number_mode, "relative");
+        assert_eq!(cfg.editor.editor_width, "centered");
 
         let serialized = toml::to_string_pretty(&cfg).expect("serialize toml");
         let parsed: AppConfig = toml::from_str(&serialized).expect("parse toml");

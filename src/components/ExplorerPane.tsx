@@ -15,15 +15,16 @@ import {
 } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { confirmDialog, type FileNode } from "../state/ipc";
-import type { DockZone, WindowStore } from "../state/store";
+import type { WindowStore } from "../state/store";
 
 interface FlatTreeItem {
   node: FileNode;
   depth: number;
   parentPath: string | null;
+  isRoot?: boolean;
 }
 
-export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
+export function ExplorerPane(props: { store: WindowStore; paneId: string }) {
   let explorerRef: HTMLDivElement | undefined;
   let createInputRef: HTMLInputElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
@@ -38,21 +39,41 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
   let renameDone = false;
   let createDone = false;
 
-  const isFocused = () =>
-    props.store.focusedZone() === props.zone && props.store.focusArea() === "explorer";
+  const isFocused = () => {
+    if (props.store.activePaneId() !== props.paneId) return false;
+    const panel = props.store.panelOfPane(props.paneId);
+    if (!props.store.isPanelVisible(panel)) return false;
+    return props.store.activeContainerInPane(props.paneId)?.kind === "explorer";
+  };
 
+  /** Snacks.nvim-style tree: opened root directory renders at depth 0, children at depth >= 1 */
   const flatItems = createMemo<FlatTreeItem[]>(() => {
+    const dir = props.store.rootDir();
+    if (!dir) return [];
+    const parts = dir.split("/").filter(Boolean);
+    const rootName = parts[parts.length - 1] ?? dir;
+    const rootNode: FileNode = {
+      name: rootName,
+      path: dir,
+      is_dir: true,
+      children: props.store.fileTree(),
+    };
+
     const out: FlatTreeItem[] = [];
     const collapsed = collapsedDirs();
-    const walk = (nodes: FileNode[], depth: number, parentPath: string | null) => {
-      for (const node of nodes) {
-        out.push({ node, depth, parentPath });
-        if (node.is_dir && !collapsed.has(node.path)) {
-          walk(node.children, depth + 1, node.path);
+
+    out.push({ node: rootNode, depth: 0, parentPath: null, isRoot: true });
+    if (!collapsed.has(rootNode.path)) {
+      const walk = (nodes: FileNode[], depth: number, parentPath: string) => {
+        for (const node of nodes) {
+          out.push({ node, depth, parentPath, isRoot: false });
+          if (node.is_dir && !collapsed.has(node.path)) {
+            walk(node.children, depth + 1, node.path);
+          }
         }
-      }
-    };
-    walk(props.store.fileTree(), 0, props.store.rootDir());
+      };
+      walk(rootNode.children, 1, rootNode.path);
+    }
     return out;
   });
 
@@ -185,7 +206,7 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
     if (e.key === "Escape" || (e.ctrlKey && e.key === "g")) {
       e.preventDefault();
       if (selectedPaths().size > 0) setSelectedPaths(new Set<string>());
-      else props.store.focusEditor();
+      else props.store.focusMainPanel();
       return;
     }
 
@@ -253,7 +274,7 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
         break;
       case "Tab":
         e.preventDefault();
-        if (item) {
+        if (item && !item.isRoot) {
           toggleSelectPath(item.node.path);
           if (cursorIndex() < list.length - 1) setCursorIndex((i) => i + 1);
         }
@@ -275,7 +296,7 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
             void props.store.moveItems(marked, dest);
             setSelectedPaths(new Set<string>());
           }
-        } else if (item) {
+        } else if (item && !item.isRoot) {
           startRename(item.node);
         }
         break;
@@ -283,7 +304,7 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
       case "c": {
         e.preventDefault();
         const marked = Array.from(selectedPaths());
-        const sources = marked.length > 0 ? marked : item ? [item.node.path] : [];
+        const sources = marked.length > 0 ? marked : item && !item.isRoot ? [item.node.path] : [];
         const dest = getTargetDirForCursor();
         if (sources.length > 0 && dest) {
           void props.store.copyItems(sources, dest);
@@ -294,7 +315,7 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
       case "d": {
         e.preventDefault();
         const marked = Array.from(selectedPaths());
-        const targets = marked.length > 0 ? marked : item ? [item.node.path] : [];
+        const targets = marked.length > 0 ? marked : item && !item.isRoot ? [item.node.path] : [];
         if (targets.length === 0) return;
         void (async () => {
           const ok = await confirmDialog(`Delete ${targets.length} item(s)?`, "Delete");
@@ -307,17 +328,10 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
     }
   };
 
-  const folderName = () => {
-    const dir = props.store.rootDir();
-    if (!dir) return "";
-    const parts = dir.split("/").filter(Boolean);
-    return parts[parts.length - 1] ?? dir;
-  };
-
   return (
     <div class="nib-explorer-pane">
       <div class="nib-explorer-toolbar">
-        <span class="nib-sidebar-title">{folderName()}</span>
+        <span class="nib-sidebar-title" />
         <div class="nib-sidebar-actions">
           <button
             class="nib-icon-btn"
@@ -399,130 +413,118 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
           ref={explorerRef}
           class="nib-tree"
           tabIndex={0}
-          onFocus={() => props.store.setFocusedZone(props.zone)}
+          onFocus={() => props.store.focusPane(props.paneId)}
           onKeyDown={handleExplorerKeyDown}
         >
-          <Show
-            when={flatItems().length > 0}
-            fallback={
-              <div class="nib-sidebar-empty">
-                <button
-                  class="nib-secondary-btn"
-                  onClick={() => void props.store.createNewNote()}
+          <For each={flatItems()}>
+            {(item, idx) => {
+              const isOpenFile = () =>
+                !item.node.is_dir && props.store.activeFilePath() === item.node.path;
+              const isCursor = () => isFocused() && idx() === cursorIndex();
+              const isMarked = () => selectedPaths().has(item.node.path);
+              const isExpanded = () => !collapsedDirs().has(item.node.path);
+              const displayName = () =>
+                item.node.is_dir
+                  ? item.node.name
+                  : item.node.name.replace(/\.(md|markdown)$/i, "");
+
+              return (
+                <div
+                  data-tree-idx={idx()}
+                  class={`nib-tree-item ${item.isRoot ? "is-root" : ""} ${isOpenFile() ? "is-active" : ""} ${isCursor() ? "is-cursor" : ""} ${isMarked() ? "is-marked" : ""}`}
+                  style={{ "padding-left": `${8 + item.depth * 16}px` }}
+                  onClick={() => {
+                    setCursorIndex(idx());
+                    props.store.focusPane(props.paneId);
+                    if (renamingPath() === item.node.path) return;
+                    if (item.node.is_dir) toggleDir(item.node.path);
+                    else void props.store.openFile(item.node.path);
+                  }}
+                  onDblClick={() => {
+                    if (!item.node.is_dir && !renamingPath()) {
+                      void props.store.openAnotherWindow(props.store.rootDir(), item.node.path);
+                    }
+                  }}
+                  title={item.node.path}
                 >
-                  New Note
-                </button>
-              </div>
-            }
-          >
-            <For each={flatItems()}>
-              {(item, idx) => {
-                const isOpenFile = () =>
-                  !item.node.is_dir && props.store.activeFilePath() === item.node.path;
-                const isCursor = () => isFocused() && idx() === cursorIndex();
-                const isMarked = () => selectedPaths().has(item.node.path);
-                const isExpanded = () => !collapsedDirs().has(item.node.path);
-                const displayName = () =>
-                  item.node.is_dir
-                    ? item.node.name
-                    : item.node.name.replace(/\.(md|markdown)$/i, "");
+                  <For each={Array.from({ length: item.depth })}>
+                    {(_, gIdx) => (
+                      <span
+                        class="nib-tree-guide"
+                        style={{ left: `${14 + gIdx() * 16}px` }}
+                      />
+                    )}
+                  </For>
 
-                return (
-                  <div
-                    data-tree-idx={idx()}
-                    class={`nib-tree-item ${isOpenFile() ? "is-active" : ""} ${isCursor() ? "is-cursor" : ""} ${isMarked() ? "is-marked" : ""}`}
-                    style={{ "padding-left": `${8 + item.depth * 16}px` }}
-                    onClick={() => {
-                      setCursorIndex(idx());
-                      props.store.setFocusedZone(props.zone);
-                      if (renamingPath() === item.node.path) return;
-                      if (item.node.is_dir) toggleDir(item.node.path);
-                      else void props.store.openFile(item.node.path);
-                    }}
-                    onDblClick={() => {
-                      if (!item.node.is_dir && !renamingPath()) {
-                        void props.store.openAnotherWindow(props.store.rootDir(), item.node.path);
-                      }
-                    }}
-                    title={item.node.path}
+                  <span class="nib-tree-chevron">
+                    <Show when={item.node.is_dir}>
+                      {isExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    </Show>
+                  </span>
+
+                  <span class={`nib-tree-icon ${item.node.is_dir ? "is-dir" : ""}`}>
+                    <Show when={item.node.is_dir} fallback={<FileText size={14} />}>
+                      {isExpanded() ? <FolderOpen size={14} /> : <Folder size={14} />}
+                    </Show>
+                  </span>
+
+                  <Show
+                    when={renamingPath() !== item.node.path}
+                    fallback={
+                      <input
+                        ref={renameInputRef}
+                        class="nib-inline-input"
+                        value={renameDraft()}
+                        onClick={(e) => e.stopPropagation()}
+                        onInput={(e) => setRenameDraft(e.currentTarget.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            commitRename();
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                      />
+                    }
                   >
-                    <For each={Array.from({ length: item.depth })}>
-                      {(_, gIdx) => (
-                        <span
-                          class="nib-tree-guide"
-                          style={{ left: `${14 + gIdx() * 16}px` }}
-                        />
-                      )}
-                    </For>
+                    <span class="nib-tree-name">{displayName()}</span>
 
-                    <span class="nib-tree-chevron">
-                      <Show when={item.node.is_dir}>
-                        {isExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      </Show>
-                    </span>
+                    <Show when={isMarked()}>
+                      <span class="nib-mark-badge">
+                        <Check size={11} />
+                      </span>
+                    </Show>
 
-                    <span class={`nib-tree-icon ${item.node.is_dir ? "is-dir" : ""}`}>
-                      <Show when={item.node.is_dir} fallback={<FileText size={14} />}>
-                        {isExpanded() ? <FolderOpen size={14} /> : <Folder size={14} />}
-                      </Show>
-                    </span>
-
-                    <Show
-                      when={renamingPath() !== item.node.path}
-                      fallback={
-                        <input
-                          ref={renameInputRef}
-                          class="nib-inline-input"
-                          value={renameDraft()}
-                          onClick={(e) => e.stopPropagation()}
-                          onInput={(e) => setRenameDraft(e.currentTarget.value)}
-                          onBlur={commitRename}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              commitRename();
-                            } else if (e.key === "Escape") {
-                              e.preventDefault();
-                              cancelRename();
-                            }
-                          }}
-                        />
-                      }
-                    >
-                      <span class="nib-tree-name">{displayName()}</span>
-
-                      <Show when={isMarked()}>
-                        <span class="nib-mark-badge">
-                          <Check size={11} />
-                        </span>
-                      </Show>
-
-                      <div class="nib-tree-row-actions">
-                        <Show when={!item.node.is_dir}>
-                          <button
-                            class="nib-row-btn"
-                            title="New Window"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void props.store.openAnotherWindow(
-                                props.store.rootDir(),
-                                item.node.path,
-                              );
-                            }}
-                          >
-                            <CopyPlus size={12} />
-                          </button>
-                        </Show>
+                    <div class="nib-tree-row-actions">
+                      <Show when={!item.node.is_dir}>
                         <button
                           class="nib-row-btn"
-                          title="Open Externally"
+                          title="New Window"
                           onClick={(e) => {
                             e.stopPropagation();
-                            void props.store.openExternal(item.node.path);
+                            void props.store.openAnotherWindow(
+                              props.store.rootDir(),
+                              item.node.path,
+                            );
                           }}
                         >
-                          <ExternalLink size={12} />
+                          <CopyPlus size={12} />
                         </button>
+                      </Show>
+                      <button
+                        class="nib-row-btn"
+                        title="Open Externally"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void props.store.openExternal(item.node.path);
+                        }}
+                      >
+                        <ExternalLink size={12} />
+                      </button>
+                      <Show when={!item.isRoot}>
                         <button
                           class="nib-row-btn"
                           title="Rename"
@@ -546,13 +548,13 @@ export function ExplorerPane(props: { store: WindowStore; zone: DockZone }) {
                         >
                           <Trash2 size={12} />
                         </button>
-                      </div>
-                    </Show>
-                  </div>
-                );
-              }}
-            </For>
-          </Show>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+              );
+            }}
+          </For>
         </div>
       </Show>
     </div>

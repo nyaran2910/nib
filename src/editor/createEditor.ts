@@ -6,14 +6,17 @@ import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, type Extension, type StateEffect } from "@codemirror/state";
 import {
   EditorView,
+  GutterMarker,
   drawSelection,
+  gutter,
   highlightActiveLine,
+  highlightActiveLineGutter,
   keymap,
   lineNumbers,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { GFM } from "@lezer/markdown";
-import type { AppConfig, StorageConfig } from "../state/ipc";
+import type { AppConfig, LineNumberMode, StorageConfig } from "../state/ipc";
 import { pluginRegistry } from "../plugins/registry";
 import { createImagePasteExtension } from "./imagePaste";
 import { createRenderMarkdownExtension } from "./renderMarkdown";
@@ -68,6 +71,68 @@ const nibHighlightStyle = HighlightStyle.define([
   { tag: t.monospace, fontFamily: "var(--nib-font-mono)" },
 ]);
 
+class RelativeLineMarker extends GutterMarker {
+  constructor(
+    readonly label: string,
+    readonly isActive: boolean,
+  ) {
+    super();
+  }
+
+  eq(other: RelativeLineMarker): boolean {
+    return this.label === other.label && this.isActive === other.isActive;
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement("span");
+    el.className = this.isActive ? "cm-relnum-active" : "cm-relnum-rel";
+    el.textContent = this.label;
+    return el;
+  }
+}
+
+function createHybridRelativeLineNumbers(): Extension {
+  const makeSpacer = (lines: number) =>
+    new RelativeLineMarker("9".repeat(Math.max(2, String(lines).length)), false);
+
+  return [
+    gutter({
+      class: "cm-lineNumbers cm-relativeLineNumbers",
+      lineMarker(view, line) {
+        const lineNo = view.state.doc.lineAt(line.from).number;
+        const activeNo = view.state.doc.lineAt(view.state.selection.main.head).number;
+        if (lineNo === activeNo) {
+          return new RelativeLineMarker(String(lineNo), true);
+        }
+        return new RelativeLineMarker(String(Math.abs(lineNo - activeNo)), false);
+      },
+      lineMarkerChange(update) {
+        return update.selectionSet || update.docChanged;
+      },
+      initialSpacer(view) {
+        return makeSpacer(view.state.doc.lines);
+      },
+      updateSpacer(spacer, update) {
+        const digits = Math.max(2, String(update.state.doc.lines).length);
+        const curDigits = (spacer as RelativeLineMarker).label.length;
+        return digits !== curDigits ? makeSpacer(update.state.doc.lines) : spacer;
+      },
+    }),
+    highlightActiveLineGutter(),
+  ];
+}
+
+function makeLineNumbersExt(mode: LineNumberMode | string): Extension {
+  if (mode === "off") return [];
+  if (mode === "absolute") return [lineNumbers(), highlightActiveLineGutter()];
+  return createHybridRelativeLineNumbers();
+}
+
+function makeEditorWidthExt(width: string): Extension {
+  const cls = width === "full" ? "nib-width-full" : "nib-width-centered";
+  return EditorView.editorAttributes.of({ class: cls });
+}
+
 function computeMetrics(state: EditorState): CursorMetrics {
   const pos = state.selection.main.head;
   const line = state.doc.lineAt(pos);
@@ -86,6 +151,7 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
   const vimCompartment = new Compartment();
   const renderMdCompartment = new Compartment();
   const lineNumbersCompartment = new Compartment();
+  const editorWidthCompartment = new Compartment();
   const indentCompartment = new Compartment();
   const pluginsCompartment = new Compartment();
 
@@ -93,9 +159,10 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
 
   // Track previous editor settings so unrelated config changes never wipe Vim state or image widgets
   let prevVimMode = params.config.editor.vim_mode;
-  let prevRenderMd = params.config.editor.render_markdown;
+  let prevRenderMode = params.config.editor.render_mode;
   let prevShowFm = params.config.editor.show_frontmatter_in_editor;
-  let prevLineNumbers = params.config.editor.line_numbers;
+  let prevLineNumberMode = params.config.editor.line_number_mode;
+  let prevEditorWidth = params.config.editor.editor_width;
   let prevTabSize = params.config.editor.tab_size;
 
   const makeVimExt = (cfg: AppConfig): Extension =>
@@ -109,13 +176,12 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
       : [];
 
   const makeRenderMdExt = (cfg: AppConfig): Extension =>
-    cfg.editor.render_markdown
-      ? createRenderMarkdownExtension(
-          params.getActiveFilePath,
-          params.getRootDir,
-          cfg.editor.show_frontmatter_in_editor,
-        )
-      : [];
+    createRenderMarkdownExtension(
+      params.getActiveFilePath,
+      params.getRootDir,
+      cfg.editor.render_mode,
+      cfg.editor.show_frontmatter_in_editor,
+    );
 
   const state = EditorState.create({
     doc: params.initialContent,
@@ -126,6 +192,7 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
       highlightActiveLine(),
       highlightSelectionMatches(),
       EditorView.lineWrapping,
+      editorWidthCompartment.of(makeEditorWidthExt(params.config.editor.editor_width)),
       syntaxHighlighting(nibHighlightStyle),
       markdown({
         base: markdownLanguage,
@@ -139,7 +206,7 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
         getRootDir: params.getRootDir,
         onStatus: params.onStatus,
       }),
-      lineNumbersCompartment.of(params.config.editor.line_numbers ? lineNumbers() : []),
+      lineNumbersCompartment.of(makeLineNumbersExt(params.config.editor.line_number_mode)),
       indentCompartment.of(indentUnit.of(" ".repeat(Math.max(1, params.config.editor.tab_size)))),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       pluginsCompartment.of(pluginRegistry.getEditorExtensions()),
@@ -188,17 +255,23 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
         effects.push(vimCompartment.reconfigure(makeVimExt(config)));
       }
       if (
-        config.editor.render_markdown !== prevRenderMd ||
+        config.editor.render_mode !== prevRenderMode ||
         config.editor.show_frontmatter_in_editor !== prevShowFm
       ) {
-        prevRenderMd = config.editor.render_markdown;
+        prevRenderMode = config.editor.render_mode;
         prevShowFm = config.editor.show_frontmatter_in_editor;
         effects.push(renderMdCompartment.reconfigure(makeRenderMdExt(config)));
       }
-      if (config.editor.line_numbers !== prevLineNumbers) {
-        prevLineNumbers = config.editor.line_numbers;
+      if (config.editor.line_number_mode !== prevLineNumberMode) {
+        prevLineNumberMode = config.editor.line_number_mode;
         effects.push(
-          lineNumbersCompartment.reconfigure(config.editor.line_numbers ? lineNumbers() : []),
+          lineNumbersCompartment.reconfigure(makeLineNumbersExt(config.editor.line_number_mode)),
+        );
+      }
+      if (config.editor.editor_width !== prevEditorWidth) {
+        prevEditorWidth = config.editor.editor_width;
+        effects.push(
+          editorWidthCompartment.reconfigure(makeEditorWidthExt(config.editor.editor_width)),
         );
       }
       if (config.editor.tab_size !== prevTabSize) {

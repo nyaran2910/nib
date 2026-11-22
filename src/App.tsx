@@ -17,15 +17,47 @@ import { SettingsModal } from "./components/SettingsModal";
 import { StatusBar } from "./components/StatusBar";
 import { pluginRegistry } from "./plugins/registry";
 import { getConfig, listenEvent, unwatchDirectory, type AppConfig } from "./state/ipc";
-import { createWindowStore, type DockZone } from "./state/store";
+import { createWindowStore, type PanelId } from "./state/store";
+
+const PUNCT_CODE_MAP: Record<string, { code: string; shifted?: string }> = {
+  ".": { code: "Period", shifted: ">" },
+  ",": { code: "Comma", shifted: "<" },
+  "[": { code: "BracketLeft", shifted: "{" },
+  "]": { code: "BracketRight", shifted: "}" },
+  "/": { code: "Slash", shifted: "?" },
+  ";": { code: "Semicolon", shifted: ":" },
+  "'": { code: "Quote", shifted: '"' },
+  "-": { code: "Minus", shifted: "_" },
+  "=": { code: "Equal", shifted: "+" },
+  "\\": { code: "Backslash", shifted: "|" },
+};
+
+function matchesKeyToken(e: KeyboardEvent, key: string): boolean {
+  if (e.key.toLowerCase() === key) return true;
+  const punct = PUNCT_CODE_MAP[key];
+  if (punct) {
+    return e.code === punct.code || (punct.shifted !== undefined && e.key === punct.shifted);
+  }
+  if (key.length === 1 && key >= "a" && key <= "z") {
+    return e.code === `Key${key.toUpperCase()}`;
+  }
+  if (key.length === 1 && key >= "0" && key <= "9") {
+    return e.code === `Digit${key}`;
+  }
+  return false;
+}
 
 function matchesKeybinding(e: KeyboardEvent, binding: string): boolean {
-  const parts = binding.split("-").map((p) => p.trim().toLowerCase());
+  const trimmed = binding.trim();
+  if (!trimmed) return false;
+  const parts = trimmed.split("-").map((p) => p.trim().toLowerCase());
   const key = parts[parts.length - 1];
-  const needMod = parts.includes("mod");
-  const needCtrl = parts.includes("ctrl");
-  const needShift = parts.includes("shift");
-  const needAlt = parts.includes("alt");
+  if (!key) return false;
+  const mods = parts.slice(0, -1);
+  const needMod = mods.includes("mod");
+  const needCtrl = mods.includes("ctrl");
+  const needShift = mods.includes("shift");
+  const needAlt = mods.includes("alt");
 
   const isMac = navigator.platform.toUpperCase().includes("MAC");
   const hasMod = isMac ? e.metaKey : e.ctrlKey;
@@ -37,7 +69,7 @@ function matchesKeybinding(e: KeyboardEvent, binding: string): boolean {
       e.ctrlKey &&
       e.shiftKey === needShift &&
       e.altKey === needAlt &&
-      e.key.toLowerCase() === key
+      matchesKeyToken(e, key)
     );
   }
   return (
@@ -45,7 +77,7 @@ function matchesKeybinding(e: KeyboardEvent, binding: string): boolean {
     hasCtrl === needCtrl &&
     e.shiftKey === needShift &&
     e.altKey === needAlt &&
-    e.key.toLowerCase() === key
+    matchesKeyToken(e, key)
   );
 }
 
@@ -57,7 +89,7 @@ export function App() {
     await store.bootstrap();
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Built-in Ctrl+Tab / Ctrl+Shift+Tab tab cycling (macOS / browser / VS Code style)
+      // Built-in Ctrl+Tab / Ctrl+Shift+Tab container cycling inside active Pane
       if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
         if (store.settingsOpen() || store.searchModalOpen() || store.commandPaletteOpen()) return;
         e.preventDefault();
@@ -112,9 +144,9 @@ export function App() {
       listenEvent("menu:search-files", () => store.openSearch("files")),
       listenEvent("menu:search-content", () => store.openSearch("content")),
       listenEvent("menu:search-tags", () => store.openSearch("tags")),
-      listenEvent("menu:toggle-sidebar", () => void store.toggleSidebar()),
+      listenEvent("menu:toggle-sidebar", () => void store.togglePanel("left")),
       listenEvent("menu:toggle-vim", () => void store.toggleVimMode()),
-      listenEvent("menu:toggle-render", () => void store.toggleRenderMarkdown()),
+      listenEvent("menu:toggle-render", () => void store.cycleRenderMode()),
     ]);
 
     onCleanup(() => {
@@ -129,16 +161,16 @@ export function App() {
     });
   });
 
-  const makeDropEdge = (zone: DockZone, label: string) => (
+  const makeDropEdge = (panel: PanelId, label: string) => (
     <div
-      class={`nib-drop-edge nib-drop-edge-${zone}`}
+      class={`nib-drop-edge nib-drop-edge-${panel}`}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
-        const id = store.draggingTabId() ?? e.dataTransfer?.getData("text/nib-tab");
+        const id = store.draggingContainerId() ?? e.dataTransfer?.getData("text/nib-tab");
         if (id) {
-          store.moveTabToZone(id, zone);
-          store.setDraggingTabId(null);
+          store.moveContainerToPanel(id, panel);
+          store.setDraggingContainerId(null);
         }
       }}
     >
@@ -153,12 +185,12 @@ export function App() {
         <button
           class="nib-ios-nav-btn"
           aria-label="Sidebar"
-          onClick={() => void store.toggleSidebar()}
+          onClick={() => void store.togglePanelVisibility("left")}
         >
           <Menu size={20} />
         </button>
         <div class="nib-ios-nav-title">
-          <span>{store.activeEditorTab()?.title ?? "Untitled"}</span>
+          <span>{store.activeEditorContainer()?.title ?? "Untitled"}</span>
           <Show when={store.dirty()}>
             <span class="nib-dirty-dot" />
           </Show>
@@ -182,23 +214,23 @@ export function App() {
       </header>
 
       <div class="nib-dock-layout">
-        {/* Left Dock Panel (Drawer on Mobile) */}
-        <Show when={store.isZoneVisible("left")}>
+        {/* Left Side Panel (Drawer on Mobile) */}
+        <Show when={store.isPanelVisible("left")}>
           <div
             class="nib-mobile-drawer-backdrop"
             onClick={() => store.setLeftVisible(false)}
           />
-          <DockPanel store={store} zone="left" />
+          <DockPanel store={store} panel="left" />
         </Show>
 
-        {/* Center + Bottom Column */}
+        {/* Main Panel + Bottom Panel Column */}
         <div class="nib-center-col">
           <div class="nib-center-main">
-            <DockPanel store={store} zone="center" />
+            <DockPanel store={store} panel="center" />
           </div>
 
-          <Show when={store.isZoneVisible("bottom")}>
-            <DockPanel store={store} zone="bottom" />
+          <Show when={store.isPanelVisible("bottom")}>
+            <DockPanel store={store} panel="bottom" />
           </Show>
 
           <Show when={store.config().ui.show_statusbar}>
@@ -206,22 +238,22 @@ export function App() {
           </Show>
         </div>
 
-        {/* Right Dock Panel */}
-        <Show when={store.isZoneVisible("right")}>
-          <DockPanel store={store} zone="right" />
+        {/* Right Side Panel */}
+        <Show when={store.isPanelVisible("right")}>
+          <DockPanel store={store} panel="right" />
         </Show>
 
-        {/* Drag-to-dock edges when dragging any tab */}
-        <Show when={store.draggingTabId()}>
-          <Show when={!store.isZoneVisible("left")}>{makeDropEdge("left", "Left")}</Show>
-          <Show when={!store.isZoneVisible("right")}>{makeDropEdge("right", "Right")}</Show>
-          <Show when={!store.isZoneVisible("bottom")}>{makeDropEdge("bottom", "Bottom")}</Show>
+        {/* Drag-to-dock edges when dragging any Container tab */}
+        <Show when={store.draggingContainerId()}>
+          <Show when={!store.isPanelVisible("left")}>{makeDropEdge("left", "Left")}</Show>
+          <Show when={!store.isPanelVisible("right")}>{makeDropEdge("right", "Right")}</Show>
+          <Show when={!store.isPanelVisible("bottom")}>{makeDropEdge("bottom", "Bottom")}</Show>
         </Show>
       </div>
 
       {/* Obsidian iOS / SwiftUI Frosted Bottom Navigation Bar */}
       <nav class="nib-ios-tabbar" aria-label="Mobile Navigation">
-        <button class="nib-ios-tab-btn" onClick={() => void store.toggleSidebar()}>
+        <button class="nib-ios-tab-btn" onClick={() => void store.togglePanelVisibility("left")}>
           <Files size={20} />
         </button>
         <button class="nib-ios-tab-btn" onClick={() => store.openSearch("omni")}>
@@ -235,7 +267,7 @@ export function App() {
           aria-label="Tabs"
           onClick={() => store.setMobileTabsOpen(true)}
         >
-          <span class="nib-ios-tab-count">{store.editorTabs().length}</span>
+          <span class="nib-ios-tab-count">{store.editorContainers().length}</span>
         </button>
         <button class="nib-ios-tab-btn" onClick={() => store.openCommandPalette()}>
           <Command size={20} />
@@ -258,7 +290,7 @@ export function App() {
                 <button
                   class="nib-icon-btn"
                   onClick={() => {
-                    store.openEmptyTab("center");
+                    store.openEmptyTab();
                     store.setMobileTabsOpen(false);
                   }}
                 >
@@ -273,12 +305,12 @@ export function App() {
               </div>
             </div>
             <div class="nib-ios-sheet-grid">
-              <For each={store.editorTabs()}>
+              <For each={store.editorContainers()}>
                 {(tab) => (
                   <div
                     class={`nib-ios-tab-card ${tab.id === store.activeEditorId() ? "is-active" : ""}`}
                     onClick={() => {
-                      void store.selectPane(tab.id, true);
+                      void store.selectContainer(tab.id, true);
                       store.setMobileTabsOpen(false);
                     }}
                   >
