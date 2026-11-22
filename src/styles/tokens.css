@@ -1,0 +1,126 @@
+:root {
+  color-scheme: light dark;
+
+  /* Apple HIG inspired semantic tokens (Light) */
+  --nib-bg: #ffffff;
+  --nib-bg-elevated: #fafafa;
+  --nib-sidebar-bg: #f5f5f7;
+  --nib-sidebar-hover: rgba(0, 0, 0, 0.05);
+  --nib-sidebar-active: rgba(0, 122, 255, 0.14);
+  --nib-sidebar-active-text: #0066d6;
+  --nib-border: rgba(0, 0, 0, 0.08);
+  --nib-border-strong: rgba(0, 0, 0, 0.14);
+
+  --nib-text: #1d1d1f;
+  --nib-text-secondary: #6e6e73;
+  --nib-text-tertiary: #98989d;
+
+  --nib-accent: #007aff;
+  --nib-accent-soft: rgba(0, 122, 255, 0.14);
+  --nib-cursor: #007aff;
+  --nib-cursor-block: rgba(0, 122, 255, 0.85);
+  --nib-cursor-block-text: #ffffff;
+  --nib-selection: rgba(0, 122, 255, 0.22);
+
+  --nib-code-bg: #f4f4f6;
+  --nib-code-border: rgba(0, 0, 0, 0.07);
+  --nib-quote-bar: #d1d1d6;
+  --nib-yank-flash: rgba(255, 196, 0, 0.42);
+
+  /* Syntax highlighting (Light - Apple Xcode inspired) */
+  --nib-syn-keyword: #9b2393;
+  --nib-syn-string: #c41a16;
+  --nib-syn-comment: #707f8c;
+  --nib-syn-number: #1c00cf;
+  --nib-syn-type: #0b4f79;
+  --nib-syn-fn: #326d74;
+  --nib-syn-meta: #643820;
+
+  --nib-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --nib-font-mono: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+  --nib-editor-font-size: 16px;
+  --nib-editor-line-height: 1.7;
+
+  --nib-titlebar-height: 40px;
+  --nib-statusbar-height: 26px;
+  --nib-radius-sm: 6px;
+  --nib-radius-md: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --nib-bg: #1c1c1e;
+    --nib-bg-elevated: #242426;
+    --nib-sidebar-bg: #232326;
+    --nib-sidebar-hover: rgba(255, 255, 255, 0.07);
+    --nib-sidebar-active: rgba(10, 132, 255, 0.26);
+    --nib-sidebar-active-text: #64b5ff;
+    --nib-border: rgba(255, 255, 255, 0.1);
+    --nib-border-strong: rgba(255, 255, 255, 0.18);
+
+    --nib-text: #f5f5f7;
+    --nib-text-secondary: #a1a1a6;
+    --nib-text-tertiary: #6e6e73;
+
+    --nib-accent: #0a84ff;
+    --nib-accent-soft: rgba(10, 132, 255, 0.22);
+    --nib-cursor: #409cff;
+    --nib-cursor-block: rgba(64, 156, 255, 0.88);
+    --nib-cursor-block-text: #ffffff;
+    --nib-selection: rgba(10, 132, 255, 0.32);
+
+    --nib-code-bg: #2c2c2e;
+    --nib-code-border: rgba(255, 255, 255, 0.09);
+    --nib-quote-bar: #545458;
+    --nib-yank-flash: rgba(255, 214, 10, 0.36);
+
+    /* Syntax highlighting (Dark - Apple Xcode Dark inspired) */
+    --nib-syn-keyword: #fc5fa3;
+    --nib-syn-string: #fc6a5d;
+    --nib-syn-comment: #6c7986;
+    --nib-syn-number: #d0bf69;
+    --nib-syn-type: #5dd8ff;
+    --nib-syn-fn: #67b7a4;
+    --nib-syn-meta: #fd8f3f;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --nib-bg: #1c1c1e;
+  --nib-bg-elevated: #242426;
+  --nib-sidebar-bg: #232326;
+  --nib-sidebar-hover: rgba(255, 255, 255, 0.07);
+  --nib-sidebar-active: rgba(10, 132, 255, 0.26);
+  --nib-sidebar-active-text: #64b5ff;
+  --nib-border: rgba(255, 255, 255, 0.1);
+  --nib-border-strong: rgba(255, 255, 255, 0.18);
+
+  --nib-text: #f5f5f7;
+  --nib-text-secondary: #a1a1a6;
+  --nib-text-tertiary: #6e6e73;
+
+  --nib-accent: #0a84ff;
+  --nib-accent-soft: rgba(10, 132, 255, 0.22);
+  --nib-cursor: #409cff;
+  --nib-cursor-block: rgba(64, 156, 255, 0.88);
+  --nib-cursor-block-text: #ffffff;
+  --nib-selection: rgba(10, 132, 255, 0.32);
+
+  --nib-code-bg: #2c2c2e;
+  --nib-code-border: rgba(255, 255, 255, 0.09);
+  --nib-quote-bar: #545458;
+  --nib-yank-flash: rgba(255, 214, 10, 0.36);
+
+  --nib-syn-keyword: #fc5fa3;
+  --nib-syn-string: #fc6a5d;
+  --nib-syn-comment: #6c7986;
+  --nib-syn-number: #d0bf69;
+  --nib-syn-type: #5dd8ff;
+  --nib-syn-fn: #67b7a4;
+  --nib-syn-meta: #fd8f3f;
+}
