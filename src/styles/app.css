@@ -644,12 +644,10 @@ body,
 
 .nib-tree-item.is-cursor {
   background: var(--nib-sidebar-hover);
-  box-shadow: inset 2px 0 0 var(--nib-text-secondary);
 }
 
 .nib-tree-item.is-active.is-cursor {
   background: var(--nib-sidebar-hover);
-  box-shadow: inset 2px 0 0 var(--nib-text);
 }
 
 .nib-tree-item.is-root {
@@ -1480,37 +1478,58 @@ body,
     display: none !important;
   }
 
-  /* SwiftUI Frosted Top Navigation Bar */
+  /* Obsidian iOS Liquid Glass Floating Top Pills */
   .nib-ios-navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: calc(8px + env(safe-area-inset-top)) 12px 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 0;
+    background: transparent;
+    border: none;
+    pointer-events: none;
+    z-index: 35;
+  }
+
+  .nib-ios-glass-circle,
+  .nib-ios-glass-capsule {
+    pointer-events: auto;
     background: color-mix(in srgb, var(--nib-bg) 82%, transparent);
-    backdrop-filter: blur(22px) saturate(180%);
-    -webkit-backdrop-filter: blur(22px) saturate(180%);
-    border-bottom: 0.5px solid var(--nib-border);
-    z-index: 30;
-    flex-shrink: 0;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 0.5px solid color-mix(in srgb, var(--nib-border-strong) 70%, transparent);
+    box-shadow:
+      0 6px 24px rgba(0, 0, 0, 0.08),
+      0 1px 4px rgba(0, 0, 0, 0.05),
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.55);
+    color: var(--nib-text);
   }
 
-  .nib-ios-nav-title {
-    display: flex;
+  .nib-ios-glass-circle {
+    appearance: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    max-width: 58vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    justify-content: center;
+    cursor: pointer;
   }
 
-  .nib-ios-nav-actions {
-    display: flex;
+  .nib-ios-glass-circle:active {
+    transform: scale(0.95);
+  }
+
+  .nib-ios-glass-capsule {
+    height: 44px;
+    padding: 0 6px;
+    border-radius: 999px;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
   }
 
   .nib-ios-nav-btn {
@@ -1519,8 +1538,8 @@ body,
     background: transparent;
     color: var(--nib-text);
     width: 38px;
-    height: 38px;
-    border-radius: 10px;
+    height: 36px;
+    border-radius: 999px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1566,54 +1585,61 @@ body,
     border-radius: 10px;
   }
 
-  /* Obsidian iOS Frosted Bottom Tab Bar */
+  /* Obsidian iOS Liquid Glass Floating Bottom Pill */
   .nib-ios-tabbar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom));
     display: flex;
     align-items: center;
-    justify-content: space-around;
-    padding: 8px 14px calc(10px + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--nib-bg-elevated) 86%, transparent);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border-top: 0.5px solid var(--nib-border);
-    flex-shrink: 0;
-    z-index: 30;
+    justify-content: space-between;
+    gap: 2px;
+    height: 52px;
+    width: min(334px, calc(100vw - 44px));
+    padding: 0 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--nib-bg) 84%, transparent);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    border: 0.5px solid color-mix(in srgb, var(--nib-border-strong) 70%, transparent);
+    box-shadow:
+      0 8px 30px rgba(0, 0, 0, 0.1),
+      0 2px 6px rgba(0, 0, 0, 0.05),
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.6);
+    z-index: 35;
   }
 
   .nib-ios-tab-btn {
     appearance: none;
     border: none;
     background: transparent;
-    color: var(--nib-text-secondary);
-    width: 46px;
-    height: 40px;
-    border-radius: 12px;
+    color: var(--nib-text);
+    width: 44px;
+    height: 42px;
+    border-radius: 999px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
 
-  .nib-ios-tab-btn:active {
-    background: var(--nib-sidebar-hover);
-    color: var(--nib-text);
+  .nib-ios-tab-btn.is-muted {
+    color: var(--nib-text-tertiary);
   }
 
-  .nib-ios-tab-primary {
-    background: var(--nib-accent);
-    color: #ffffff;
-    border-radius: 999px;
-    width: 48px;
-    height: 36px;
+  .nib-ios-tab-btn:active {
+    background: var(--nib-sidebar-hover);
   }
 
   .nib-ios-tab-count {
-    min-width: 22px;
+    min-width: 24px;
     height: 22px;
-    padding: 0 5px;
+    padding: 0 6px;
     border-radius: 6px;
-    border: 1.6px solid currentColor;
+    border: 1.7px solid currentColor;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
+    line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;

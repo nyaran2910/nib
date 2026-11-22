@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { createNibEditor, type NibEditorController } from "../editor/createEditor";
 import { pluginRegistry } from "../plugins/registry";
 import type { ContainerTab, WindowStore } from "../state/store";
@@ -6,6 +6,25 @@ import type { ContainerTab, WindowStore } from "../state/store";
 export function EditorView(props: { store: WindowStore; tab: () => ContainerTab }) {
   let hostRef: HTMLDivElement | undefined;
   let controller: NibEditorController | undefined;
+  const [titleDraft, setTitleDraft] = createSignal(props.tab().title);
+
+  createEffect(() => {
+    setTitleDraft(props.tab().title);
+  });
+
+  const commitTitleRename = () => {
+    const t = props.tab();
+    const next = titleDraft().trim();
+    if (!next || next === t.title) {
+      setTitleDraft(t.title);
+      return;
+    }
+    if (t.path) {
+      void props.store.renameItem(t.path, next);
+    } else {
+      setTitleDraft(t.title);
+    }
+  };
 
   onMount(() => {
     if (!hostRef) return;
@@ -74,6 +93,11 @@ export function EditorView(props: { store: WindowStore; tab: () => ContainerTab 
     controller?.applyConfig(cfg);
   });
 
+  const widthClass = () =>
+    props.store.config().editor.editor_width === "full"
+      ? "nib-width-full"
+      : "nib-width-centered";
+
   return (
     <div
       class="nib-editor-container"
@@ -84,6 +108,28 @@ export function EditorView(props: { store: WindowStore; tab: () => ContainerTab 
         }
       }}
     >
+      <div class={`nib-editor-inline-title-wrap ${widthClass()}`}>
+        <input
+          class="nib-editor-inline-title"
+          type="text"
+          value={titleDraft()}
+          readOnly={!props.tab().path}
+          aria-label="Note title"
+          onInput={(e) => setTitleDraft(e.currentTarget.value)}
+          onBlur={commitTitleRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitTitleRename();
+              controller?.view.focus();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setTitleDraft(props.tab().title);
+              controller?.view.focus();
+            }
+          }}
+        />
+      </div>
       <div class="nib-cm-host" ref={hostRef} />
     </div>
   );

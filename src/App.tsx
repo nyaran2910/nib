@@ -1,9 +1,10 @@
 import {
-  Command,
-  FilePlus,
-  Files,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Menu,
   MoreHorizontal,
+  PanelLeft,
   Plus,
   Search,
   Settings,
@@ -232,35 +233,30 @@ export function App() {
 
   return (
     <div class="nib-shell">
-      {/* SwiftUI / Obsidian iOS Frosted Mobile Navigation Bar */}
+      {/* Obsidian iOS Liquid Glass Floating Top Pills */}
       <header class="nib-ios-navbar">
         <button
-          class="nib-ios-nav-btn"
+          class="nib-ios-glass-circle"
           aria-label="Sidebar"
           onClick={() => void store.togglePanelVisibility("left")}
         >
-          <Menu size={20} />
+          <PanelLeft size={19} />
         </button>
-        <div class="nib-ios-nav-title">
-          <span>{store.activeEditorContainer()?.title ?? "Untitled"}</span>
-          <Show when={store.dirty()}>
-            <span class="nib-dirty-dot" />
-          </Show>
-        </div>
-        <div class="nib-ios-nav-actions">
+
+        <div class="nib-ios-glass-capsule">
           <button
             class="nib-ios-nav-btn"
-            aria-label="Search"
-            onClick={() => store.openSearch("omni")}
+            aria-label="Render Mode"
+            onClick={() => void store.cycleRenderMode()}
           >
-            <Search size={19} />
+            <BookOpen size={18} />
           </button>
           <button
             class="nib-ios-nav-btn"
             aria-label="Settings"
             onClick={() => store.openSettings()}
           >
-            <MoreHorizontal size={20} />
+            <MoreHorizontal size={19} />
           </button>
         </div>
       </header>
@@ -318,16 +314,35 @@ export function App() {
         )}
       </Show>
 
-      {/* Obsidian iOS / SwiftUI Frosted Bottom Navigation Bar */}
+      {/* Obsidian iOS Liquid Glass Floating Bottom Pill Bar */}
       <nav class="nib-ios-tabbar" aria-label="Mobile Navigation">
-        <button class="nib-ios-tab-btn" onClick={() => void store.togglePanelVisibility("left")}>
-          <Files size={20} />
+        <button
+          class={`nib-ios-tab-btn ${store.editorContainers().length <= 1 ? "is-muted" : ""}`}
+          aria-label="Previous Tab"
+          onClick={() => store.prevTab()}
+        >
+          <ChevronLeft size={20} />
         </button>
-        <button class="nib-ios-tab-btn" onClick={() => store.openSearch("omni")}>
+        <button
+          class={`nib-ios-tab-btn ${store.editorContainers().length <= 1 ? "is-muted" : ""}`}
+          aria-label="Next Tab"
+          onClick={() => store.nextTab()}
+        >
+          <ChevronRight size={20} />
+        </button>
+        <button
+          class="nib-ios-tab-btn"
+          aria-label="Search"
+          onClick={() => store.openSearch("omni")}
+        >
           <Search size={20} />
         </button>
-        <button class="nib-ios-tab-btn nib-ios-tab-primary" onClick={() => void store.createNewNote()}>
-          <FilePlus size={20} />
+        <button
+          class="nib-ios-tab-btn"
+          aria-label="New Tab"
+          onClick={() => store.openEmptyTab()}
+        >
+          <Plus size={22} />
         </button>
         <button
           class="nib-ios-tab-btn"
@@ -336,8 +351,12 @@ export function App() {
         >
           <span class="nib-ios-tab-count">{store.editorContainers().length}</span>
         </button>
-        <button class="nib-ios-tab-btn" onClick={() => store.openCommandPalette()}>
-          <Command size={20} />
+        <button
+          class="nib-ios-tab-btn"
+          aria-label="Menu"
+          onClick={() => store.openCommandPalette()}
+        >
+          <Menu size={20} />
         </button>
       </nav>
 

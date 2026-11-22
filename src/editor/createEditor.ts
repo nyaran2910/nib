@@ -148,6 +148,7 @@ function computeMetrics(state: EditorState): CursorMetrics {
 }
 
 export function createNibEditor(params: CreateEditorParams): NibEditorController {
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
   const vimCompartment = new Compartment();
   const renderMdCompartment = new Compartment();
   const lineNumbersCompartment = new Compartment();
@@ -166,7 +167,7 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
   let prevTabSize = params.config.editor.tab_size;
 
   const makeVimExt = (cfg: AppConfig): Extension =>
-    cfg.editor.vim_mode
+    !isMobile && cfg.editor.vim_mode
       ? createVimExtension({
           yankHighlightMs: cfg.editor.yank_highlight_ms,
           onModeChange: params.onVimModeChange,
@@ -189,8 +190,8 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
       createMacEmacsInsertKeymap(),
       vimCompartment.of(makeVimExt(params.config)),
       history(),
-      drawSelection(),
-      highlightActiveLine(),
+      // Use native iOS caret & selection handles on mobile (avoids WKWebView drawSelection vertical offset)
+      ...(isMobile ? [] : [drawSelection(), highlightActiveLine()]),
       highlightSelectionMatches(),
       EditorView.lineWrapping,
       editorWidthCompartment.of(makeEditorWidthExt(params.config.editor.editor_width)),
@@ -207,7 +208,9 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
         getRootDir: params.getRootDir,
         onStatus: params.onStatus,
       }),
-      lineNumbersCompartment.of(makeLineNumbersExt(params.config.editor.line_number_mode)),
+      lineNumbersCompartment.of(
+        isMobile ? [] : makeLineNumbersExt(params.config.editor.line_number_mode),
+      ),
       indentCompartment.of(indentUnit.of(" ".repeat(Math.max(1, params.config.editor.tab_size)))),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       pluginsCompartment.of(pluginRegistry.getEditorExtensions()),
@@ -266,7 +269,9 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
       if (config.editor.line_number_mode !== prevLineNumberMode) {
         prevLineNumberMode = config.editor.line_number_mode;
         effects.push(
-          lineNumbersCompartment.reconfigure(makeLineNumbersExt(config.editor.line_number_mode)),
+          lineNumbersCompartment.reconfigure(
+            isMobile ? [] : makeLineNumbersExt(config.editor.line_number_mode),
+          ),
         );
       }
       if (config.editor.editor_width !== prevEditorWidth) {
