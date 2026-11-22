@@ -13,34 +13,37 @@ import {
   X,
 } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
-import type { ContainerTab, PaneNode, PanelId, WindowStore } from "../state/store";
+import type { ContainerTab, PanelId, WindowStore } from "../state/store";
 import { EditorView } from "./EditorView";
 import { ExplorerPane } from "./ExplorerPane";
 import { PropertiesPanel } from "./PropertiesPanel";
 
 function PaneView(props: {
   store: WindowStore;
-  pane: PaneNode;
-  paneIndex: number;
-  totalPanes: number;
+  paneId: string;
+  paneIndex: () => number;
+  totalPanes: () => number;
 }) {
   let emptyPaneRef: HTMLDivElement | undefined;
   const [dragOver, setDragOver] = createSignal(false);
 
-  const tabs = createMemo(() => props.store.containersInPane(props.pane.id));
-  const activeTab = createMemo<ContainerTab | undefined>(() =>
-    props.store.activeContainerInPane(props.pane.id),
+  const panel = createMemo(() => props.store.panelOfPane(props.paneId));
+  const tabIds = createMemo(() =>
+    props.store.containersInPane(props.paneId).map((c) => c.id),
   );
-  const isPaneFocused = () => props.store.activePaneId() === props.pane.id;
+  const getTab = (id: string) => props.store.containers().find((c) => c.id === id);
+  const activeTab = createMemo<ContainerTab | undefined>(() =>
+    props.store.activeContainerInPane(props.paneId),
+  );
+  const isPaneFocused = () => props.store.activePaneId() === props.paneId;
   const ui = () => props.store.config().ui;
-  const panel = () => props.pane.panel;
   const showHeader = () => (panel() === "center" ? ui().show_topbar : true);
   const needsTrafficLightPad = () =>
-    props.paneIndex === 0 &&
+    props.paneIndex() === 0 &&
     (panel() === "left" || (panel() === "center" && !props.store.isPanelVisible("left")));
 
   createEffect(() => {
-    if (isPaneFocused() && !activeTab()) {
+    if (isPaneFocused() && !activeTab() && document.activeElement !== emptyPaneRef) {
       queueMicrotask(() => emptyPaneRef?.focus());
     }
   });
@@ -56,7 +59,7 @@ function PaneView(props: {
     setDragOver(false);
     const id = props.store.draggingContainerId() ?? e.dataTransfer?.getData("text/nib-tab");
     if (id) {
-      props.store.moveContainerToPane(id, props.pane.id);
+      props.store.moveContainerToPane(id, props.paneId);
       props.store.setDraggingContainerId(null);
     }
   };
@@ -72,16 +75,22 @@ function PaneView(props: {
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
-      onMouseDown={() => props.store.focusPane(props.pane.id)}
+      onMouseDown={() => {
+        if (props.store.activePaneId() !== props.paneId) {
+          props.store.focusPane(props.paneId, false);
+        }
+      }}
     >
       <Show when={showHeader()}>
         <header
           class={`nib-dock-header ${needsTrafficLightPad() ? "is-left-chrome" : ""}`}
           data-tauri-drag-region={
-            props.paneIndex === 0 && (panel() === "left" || panel() === "center") ? "" : undefined
+            props.paneIndex() === 0 && (panel() === "left" || panel() === "center")
+              ? ""
+              : undefined
           }
         >
-          <Show when={panel() === "center" && props.paneIndex === 0}>
+          <Show when={panel() === "center" && props.paneIndex() === 0}>
             <button
               class="nib-icon-btn"
               title="Toggle Left Side Panel"
@@ -95,62 +104,67 @@ function PaneView(props: {
           </Show>
 
           <div class="nib-tabs-strip" role="tablist">
-            <For each={tabs()}>
-              {(tab) => {
-                const isActive = () => activeTab()?.id === tab.id;
-                const isEditor = () => tab.kind === "editor";
+            <For each={tabIds()}>
+              {(tabId) => {
+                const tab = () => getTab(tabId);
+                const isActive = () => activeTab()?.id === tabId;
+                const isEditor = () => tab()?.kind === "editor";
                 return (
-                  <div
-                    role="tab"
-                    aria-selected={isActive()}
-                    draggable={true}
-                    onDragStart={(e) => {
-                      props.store.setDraggingContainerId(tab.id);
-                      e.dataTransfer?.setData("text/nib-tab", tab.id);
-                    }}
-                    onDragEnd={() => props.store.setDraggingContainerId(null)}
-                    class={`nib-tab ${isEditor() ? "nib-tab-editor" : "nib-tab-icon-only"} ${isActive() ? "is-active" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void props.store.selectContainer(tab.id, true);
-                    }}
-                    onMouseDown={(e) => {
-                      if (e.button === 1 && isEditor()) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void props.store.closeTab(tab.id);
-                      }
-                    }}
-                    title={tab.path ?? tab.title}
-                  >
-                    <Show when={isEditor()} fallback={renderNonEditorIcon(tab.kind)}>
-                      <span class="nib-tab-title">{tab.title}</span>
-                      <Show when={tab.dirty}>
-                        <span class="nib-dirty-dot" />
-                      </Show>
-                      <button
-                        class="nib-tab-close"
-                        title="Close"
+                  <Show when={tab()}>
+                    {(t) => (
+                      <div
+                        role="tab"
+                        aria-selected={isActive()}
+                        draggable={true}
+                        onDragStart={(e) => {
+                          props.store.setDraggingContainerId(tabId);
+                          e.dataTransfer?.setData("text/nib-tab", tabId);
+                        }}
+                        onDragEnd={() => props.store.setDraggingContainerId(null)}
+                        class={`nib-tab ${isEditor() ? "nib-tab-editor" : "nib-tab-icon-only"} ${isActive() ? "is-active" : ""}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          void props.store.closeTab(tab.id);
+                          void props.store.selectContainer(tabId, true);
                         }}
+                        onMouseDown={(e) => {
+                          if (e.button === 1 && isEditor()) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void props.store.closeTab(tabId);
+                          }
+                        }}
+                        title={t().path ?? t().title}
                       >
-                        <X size={12} />
-                      </button>
-                    </Show>
-                  </div>
+                        <Show when={isEditor()} fallback={renderNonEditorIcon(t().kind)}>
+                          <span class="nib-tab-title">{t().title}</span>
+                          <Show when={t().dirty}>
+                            <span class="nib-dirty-dot" />
+                          </Show>
+                          <button
+                            class="nib-tab-close"
+                            title="Close"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void props.store.closeTab(tabId);
+                            }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </Show>
+                      </div>
+                    )}
+                  </Show>
                 );
               }}
             </For>
 
-            <Show when={panel() === "center" || tabs().length === 0}>
+            <Show when={panel() === "center" || tabIds().length === 0}>
               <button
                 class="nib-icon-btn nib-tab-new"
                 title="New Tab"
                 onClick={(e) => {
                   e.stopPropagation();
-                  props.store.openEmptyTab(props.pane.id);
+                  props.store.openEmptyTab(props.paneId);
                 }}
               >
                 <Plus size={14} />
@@ -164,18 +178,18 @@ function PaneView(props: {
               title="Split Pane"
               onClick={(e) => {
                 e.stopPropagation();
-                props.store.splitPane(props.pane.id);
+                props.store.splitPane(props.paneId);
               }}
             >
               <Columns2 size={14} />
             </button>
-            <Show when={props.totalPanes > 1}>
+            <Show when={props.totalPanes() > 1}>
               <button
                 class="nib-icon-btn"
                 title="Close Pane"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void props.store.closePane(props.pane.id);
+                  void props.store.closePane(props.paneId);
                 }}
               >
                 <X size={14} />
@@ -202,7 +216,7 @@ function PaneView(props: {
             >
               <button
                 class="nib-secondary-btn"
-                onClick={() => props.store.openEmptyTab(props.pane.id)}
+                onClick={() => props.store.openEmptyTab(props.paneId)}
               >
                 New Tab
               </button>
@@ -215,9 +229,9 @@ function PaneView(props: {
               fallback={
                 <Show
                   when={tab().kind === "explorer"}
-                  fallback={<PropertiesPanel store={props.store} paneId={props.pane.id} />}
+                  fallback={<PropertiesPanel store={props.store} paneId={props.paneId} />}
                 >
-                  <ExplorerPane store={props.store} paneId={props.pane.id} />
+                  <ExplorerPane store={props.store} paneId={props.paneId} />
                 </Show>
               }
             >
@@ -231,7 +245,10 @@ function PaneView(props: {
 }
 
 export function DockPanel(props: { store: WindowStore; panel: PanelId }) {
-  const panes = createMemo(() => props.store.panesInPanel(props.panel));
+  // Key <For> by primitive pane ID so updating pane state NEVER destroys/remounts PaneView
+  const paneIds = createMemo(() =>
+    props.store.panesInPanel(props.panel).map((p) => p.id),
+  );
   const isPanelFocused = () => props.store.focusedPanel() === props.panel;
   const ui = () => props.store.config().ui;
   const renderMode = () => props.store.config().editor.render_mode;
@@ -248,13 +265,13 @@ export function DockPanel(props: { store: WindowStore; panel: PanelId }) {
       <div
         class={`nib-panel-panes ${props.panel === "left" || props.panel === "right" ? "is-vertical" : "is-horizontal"}`}
       >
-        <For each={panes()}>
-          {(pane, idx) => (
+        <For each={paneIds()}>
+          {(paneId, idx) => (
             <PaneView
               store={props.store}
-              pane={pane}
-              paneIndex={idx()}
-              totalPanes={panes().length}
+              paneId={paneId}
+              paneIndex={idx}
+              totalPanes={() => paneIds().length}
             />
           )}
         </For>

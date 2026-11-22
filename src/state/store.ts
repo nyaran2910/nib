@@ -163,7 +163,17 @@ export function createWindowStore() {
   };
 
   const updatePane = (id: string, patch: Partial<PaneNode>) => {
-    setPanes((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    setPanes((prev) => {
+      const cur = prev.find((p) => p.id === id);
+      if (!cur) return prev;
+      if (
+        (patch.panel === undefined || patch.panel === cur.panel) &&
+        (patch.activeContainerId === undefined || patch.activeContainerId === cur.activeContainerId)
+      ) {
+        return prev;
+      }
+      return prev.map((p) => (p.id === id ? { ...p, ...patch } : p));
+    });
   };
 
   const setContent = (next: string) => {
@@ -208,19 +218,31 @@ export function createWindowStore() {
     return node;
   };
 
-  const focusPane = (paneId: string) => {
+  const focusPane = (paneId: string, focusDom = true) => {
     const pane = getPane(paneId);
     if (!pane) return;
-    setPanelVisible(pane.panel, true);
-    setActivePaneId(pane.id);
-    setLastPaneByPanel((prev) => ({ ...prev, [pane.panel]: pane.id }));
+    if (!isPanelVisible(pane.panel)) {
+      setPanelVisible(pane.panel, true);
+    }
+    if (activePaneId() !== pane.id) {
+      setActivePaneId(pane.id);
+    }
+    if (lastPaneByPanel()[pane.panel] !== pane.id) {
+      setLastPaneByPanel((prev) => ({ ...prev, [pane.panel]: pane.id }));
+    }
 
     const active = activeContainerInPane(pane.id);
     if (active) {
-      updatePane(pane.id, { activeContainerId: active.id });
+      if (pane.activeContainerId !== active.id) {
+        updatePane(pane.id, { activeContainerId: active.id });
+      }
       if (active.kind === "editor") {
-        setActiveEditorId(active.id);
-        queueMicrotask(() => editorFocusMap.get(active.id)?.());
+        if (activeEditorId() !== active.id) {
+          setActiveEditorId(active.id);
+        }
+        if (focusDom) {
+          queueMicrotask(() => editorFocusMap.get(active.id)?.());
+        }
       }
     }
   };
@@ -416,16 +438,20 @@ export function createWindowStore() {
     }
 
     const panel = panelOfPane(target.paneId);
-    setPanelVisible(panel, true);
+    if (!isPanelVisible(panel)) setPanelVisible(panel, true);
     updatePane(target.paneId, { activeContainerId: target.id });
 
     if (target.kind === "editor") {
-      setActiveEditorId(target.id);
-      setFileLoadVersion((v) => v + 1);
+      if (activeEditorId() !== target.id) {
+        setActiveEditorId(target.id);
+        setFileLoadVersion((v) => v + 1);
+      }
     }
     if (focus) {
-      setActivePaneId(target.paneId);
-      setLastPaneByPanel((prev) => ({ ...prev, [panel]: target.paneId }));
+      if (activePaneId() !== target.paneId) setActivePaneId(target.paneId);
+      if (lastPaneByPanel()[panel] !== target.paneId) {
+        setLastPaneByPanel((prev) => ({ ...prev, [panel]: target.paneId }));
+      }
       if (target.kind === "editor") {
         queueMicrotask(() => editorFocusMap.get(target.id)?.());
       }

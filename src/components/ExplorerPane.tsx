@@ -83,7 +83,12 @@ export function ExplorerPane(props: { store: WindowStore; paneId: string }) {
   });
 
   createEffect(() => {
-    if (isFocused()) {
+    if (
+      isFocused() &&
+      explorerRef &&
+      document.activeElement !== explorerRef &&
+      !explorerRef.contains(document.activeElement)
+    ) {
       queueMicrotask(() => explorerRef?.focus());
     }
   });
@@ -413,7 +418,11 @@ export function ExplorerPane(props: { store: WindowStore; paneId: string }) {
           ref={explorerRef}
           class="nib-tree"
           tabIndex={0}
-          onFocus={() => props.store.focusPane(props.paneId)}
+          onFocus={() => {
+            if (props.store.activePaneId() !== props.paneId) {
+              props.store.focusPane(props.paneId, false);
+            }
+          }}
           onKeyDown={handleExplorerKeyDown}
         >
           <For each={flatItems()}>

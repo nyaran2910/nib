@@ -79,7 +79,9 @@ export function EditorView(props: { store: WindowStore; tab: () => ContainerTab 
       class="nib-editor-container"
       onMouseDown={() => {
         const t = props.tab();
-        void props.store.selectContainer(t.id, false);
+        if (props.store.activeEditorId() !== t.id) {
+          void props.store.selectContainer(t.id, false);
+        }
       }}
     >
       <div class="nib-cm-host" ref={hostRef} />

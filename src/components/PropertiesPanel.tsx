@@ -62,7 +62,12 @@ export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
   const parsed = createMemo(() => parseFrontmatter(props.store.content()));
 
   createEffect(() => {
-    if (isFocused()) {
+    if (
+      isFocused() &&
+      containerRef &&
+      document.activeElement !== containerRef &&
+      !containerRef.contains(document.activeElement)
+    ) {
       queueMicrotask(() => containerRef?.focus());
     }
   });
@@ -124,7 +129,11 @@ export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
       ref={containerRef}
       class="nib-properties-panel"
       tabIndex={0}
-      onFocus={() => props.store.focusPane(props.paneId)}
+      onFocus={() => {
+        if (props.store.activePaneId() !== props.paneId) {
+          props.store.focusPane(props.paneId, false);
+        }
+      }}
       onKeyDown={handleKeyDown}
     >
       <div class="nib-prop-list">
