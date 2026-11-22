@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from "lucide-solid";
-import { For, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { WindowStore } from "../state/store";
 
 interface FrontmatterEntry {
@@ -48,9 +48,17 @@ function serializeFrontmatter(entries: FrontmatterEntry[], body: string): string
 
 export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
   let containerRef: HTMLDivElement | undefined;
+  let addKeyRef: HTMLInputElement | undefined;
+  let addValRef: HTMLInputElement | undefined;
+
   const [newKey, setNewKey] = createSignal("");
   const [newVal, setNewVal] = createSignal("");
-  const [activeIdx, setActiveIdx] = createSignal(0);
+  // Unified row index: 0 = top Add form, 1..N = existing entries
+  const [cursorRow, setCursorRow] = createSignal(0);
+  const [cursorCol, setCursorCol] = createSignal<"key" | "value">("key");
+  const [editingInput, setEditingInput] = createSignal(false);
+
+  const isVimMode = () => props.store.config().properties.keymap_mode !== "standard";
 
   const isFocused = () => {
     if (props.store.activePaneId() !== props.paneId) return false;
@@ -60,6 +68,12 @@ export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
   };
 
   const parsed = createMemo(() => parseFrontmatter(props.store.content()));
+  const totalRows = () => 1 + parsed().entries.length;
+
+  createEffect(() => {
+    const max = Math.max(0, totalRows() - 1);
+    if (cursorRow() > max) setCursorRow(max);
+  });
 
   createEffect(() => {
     if (
@@ -72,9 +86,24 @@ export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
     }
   });
 
+  createEffect(() => {
+    const row = cursorRow();
+    if (isFocused()) {
+      queueMicrotask(() => {
+        const el = containerRef?.querySelector(`[data-prop-row="${row}"]`) as HTMLElement | null;
+        el?.scrollIntoView({ block: "nearest" });
+      });
+    }
+  });
+
   const commitEntries = (nextEntries: FrontmatterEntry[]) => {
     const updated = serializeFrontmatter(nextEntries, parsed().body);
     props.store.onEditorContentChange(updated);
+  };
+
+  const updateKey = (idx: number, key: string) => {
+    const list = parsed().entries.map((e, i) => (i === idx ? { ...e, key } : e));
+    commitEntries(list);
   };
 
   const updateValue = (idx: number, val: string) => {
@@ -87,40 +116,133 @@ export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
     commitEntries(list);
   };
 
-  const addEntry = () => {
+  const addEntry = (): boolean => {
     const k = newKey().trim();
-    if (!k) return;
-    commitEntries([...parsed().entries, { key: k, value: newVal().trim() }]);
+    if (!k) return false;
+    commitEntries([{ key: k, value: newVal().trim() }, ...parsed().entries]);
     setNewKey("");
     setNewVal("");
+    return true;
+  };
+
+  const focusField = (row: number, col: "key" | "value") => {
+    setCursorRow(row);
+    setCursorCol(col);
+    queueMicrotask(() => {
+      let input: HTMLInputElement | null = null;
+      if (row === 0) {
+        input = col === "key" ? (addKeyRef ?? null) : (addValRef ?? null);
+      } else {
+        input =
+          containerRef?.querySelector<HTMLInputElement>(
+            `[data-prop-row="${row}"] input[data-prop-col="${col}"]`,
+          ) ?? null;
+      }
+      if (input) {
+        input.focus();
+        setEditingInput(true);
+      }
+    });
+  };
+
+  const exitInsertToNormal = () => {
+    const active = document.activeElement as HTMLElement | null;
+    if (active && active !== containerRef) {
+      active.blur();
+    }
+    setEditingInput(false);
+    containerRef?.focus();
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
     const inInput = target?.tagName === "INPUT";
+
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       if (inInput) {
-        target?.blur();
-        containerRef?.focus();
+        exitInsertToNormal();
       } else {
         props.store.focusMainPanel();
       }
       return;
     }
+
     if (inInput) return;
 
-    const len = parsed().entries.length;
-    if (len === 0) return;
-    if (e.key === "j" || e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
-      e.preventDefault();
-      setActiveIdx((i) => (i + 1) % len);
-    } else if (e.key === "k" || e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
-      e.preventDefault();
-      setActiveIdx((i) => (i - 1 + len) % len);
-    } else if (e.ctrlKey && e.key === "g") {
+    if (e.ctrlKey && e.key === "g") {
       e.preventDefault();
       props.store.focusMainPanel();
+      return;
+    }
+
+    const rows = totalRows();
+
+    // Common navigation (works in both Vim and Standard modes)
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+      e.preventDefault();
+      setCursorRow((r) => Math.min(rows - 1, r + 1));
+      return;
+    }
+    if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+      e.preventDefault();
+      setCursorRow((r) => Math.max(0, r - 1));
+      return;
+    }
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setCursorCol("key");
+      return;
+    }
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setCursorCol("value");
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      focusField(cursorRow(), cursorCol());
+      return;
+    }
+
+    if (!isVimMode() || e.metaKey || e.ctrlKey || e.altKey) return;
+
+    switch (e.key) {
+      case "j":
+        e.preventDefault();
+        setCursorRow((r) => Math.min(rows - 1, r + 1));
+        break;
+      case "k":
+        e.preventDefault();
+        setCursorRow((r) => Math.max(0, r - 1));
+        break;
+      case "h":
+        e.preventDefault();
+        setCursorCol("key");
+        break;
+      case "l":
+        e.preventDefault();
+        setCursorCol("value");
+        break;
+      case "i":
+      case "a":
+        e.preventDefault();
+        focusField(cursorRow(), cursorCol());
+        break;
+      case "o":
+        e.preventDefault();
+        focusField(0, "key");
+        break;
+      case "d":
+      case "x": {
+        e.preventDefault();
+        const row = cursorRow();
+        if (row >= 1) {
+          removeEntry(row - 1);
+        }
+        break;
+      }
     }
   };
 
@@ -129,64 +251,147 @@ export function PropertiesPanel(props: { store: WindowStore; paneId: string }) {
       ref={containerRef}
       class="nib-properties-panel"
       tabIndex={0}
-      onFocus={() => {
+      onFocus={(e) => {
+        if (e.target === containerRef) setEditingInput(false);
         if (props.store.activePaneId() !== props.paneId) {
           props.store.focusPane(props.paneId, false);
         }
       }}
       onKeyDown={handleKeyDown}
     >
-      <div class="nib-prop-list">
-        <For each={parsed().entries}>
-          {(entry, idx) => (
-            <div
-              class={`nib-prop-row ${idx() === activeIdx() && isFocused() ? "is-cursor" : ""}`}
-              onClick={() => setActiveIdx(idx())}
-            >
-              <div class="nib-prop-key-row">
-                <span class="nib-prop-key">{entry.key}</span>
-                <button
-                  class="nib-row-btn"
-                  title="Remove"
-                  onClick={() => removeEntry(idx())}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-              <input
-                class="nib-prop-input"
-                value={entry.value}
-                onInput={(e) => updateValue(idx(), e.currentTarget.value)}
-              />
-            </div>
-          )}
-        </For>
-      </div>
-
-      <div class="nib-prop-add">
+      {/* Top Add Key/Value Form (Row 0) */}
+      <div
+        data-prop-row="0"
+        class={`nib-prop-add ${cursorRow() === 0 && isFocused() ? "is-cursor" : ""}`}
+        onClick={() => setCursorRow(0)}
+      >
+        <div class="nib-prop-add-header">
+          <Show when={isVimMode() && isFocused()}>
+            <span class={`nib-prop-mode ${editingInput() ? "is-insert" : ""}`}>
+              {editingInput() ? "INSERT" : "NORMAL"}
+            </span>
+          </Show>
+        </div>
         <input
-          class="nib-prop-input"
+          ref={addKeyRef}
+          data-prop-col="key"
+          class={`nib-prop-input ${cursorRow() === 0 && cursorCol() === "key" && isFocused() && !editingInput() ? "is-field-cursor" : ""}`}
           placeholder="key"
           value={newKey()}
+          onFocus={() => {
+            setCursorRow(0);
+            setCursorCol("key");
+            setEditingInput(true);
+          }}
+          onBlur={() => setEditingInput(false)}
           onInput={(e) => setNewKey(e.currentTarget.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") addEntry();
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (newKey().trim() && !newVal().trim()) {
+                focusField(0, "value");
+              } else if (addEntry() && isVimMode()) {
+                exitInsertToNormal();
+              }
+            }
           }}
         />
         <div class="nib-prop-add-row">
           <input
-            class="nib-prop-input"
+            ref={addValRef}
+            data-prop-col="value"
+            class={`nib-prop-input ${cursorRow() === 0 && cursorCol() === "value" && isFocused() && !editingInput() ? "is-field-cursor" : ""}`}
             placeholder="value"
             value={newVal()}
+            onFocus={() => {
+              setCursorRow(0);
+              setCursorCol("value");
+              setEditingInput(true);
+            }}
+            onBlur={() => setEditingInput(false)}
             onInput={(e) => setNewVal(e.currentTarget.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") addEntry();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (addEntry() && isVimMode()) {
+                  exitInsertToNormal();
+                }
+              }
             }}
           />
-          <button class="nib-icon-btn" title="Add" onClick={addEntry}>
+          <button
+            class="nib-icon-btn"
+            title="Add"
+            onClick={() => {
+              addEntry();
+            }}
+          >
             <Plus size={14} />
           </button>
         </div>
+      </div>
+
+      {/* Existing Frontmatter Entries (Rows 1..N) */}
+      <div class="nib-prop-list">
+        <For each={parsed().entries}>
+          {(entry, idx) => {
+            const rowNum = () => idx() + 1;
+            const isRowActive = () => cursorRow() === rowNum() && isFocused();
+            return (
+              <div
+                data-prop-row={rowNum()}
+                class={`nib-prop-row ${isRowActive() ? "is-cursor" : ""}`}
+                onClick={() => setCursorRow(rowNum())}
+              >
+                <div class="nib-prop-key-row">
+                  <input
+                    data-prop-col="key"
+                    class={`nib-prop-key-input ${isRowActive() && cursorCol() === "key" && !editingInput() ? "is-field-cursor" : ""}`}
+                    value={entry.key}
+                    onFocus={() => {
+                      setCursorRow(rowNum());
+                      setCursorCol("key");
+                      setEditingInput(true);
+                    }}
+                    onBlur={() => setEditingInput(false)}
+                    onInput={(e) => updateKey(idx(), e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && isVimMode()) {
+                        e.preventDefault();
+                        exitInsertToNormal();
+                      }
+                    }}
+                  />
+                  <button
+                    class="nib-row-btn"
+                    title="Remove"
+                    onClick={() => removeEntry(idx())}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+                <input
+                  data-prop-col="value"
+                  class={`nib-prop-input ${isRowActive() && cursorCol() === "value" && !editingInput() ? "is-field-cursor" : ""}`}
+                  value={entry.value}
+                  onFocus={() => {
+                    setCursorRow(rowNum());
+                    setCursorCol("value");
+                    setEditingInput(true);
+                  }}
+                  onBlur={() => setEditingInput(false)}
+                  onInput={(e) => updateValue(idx(), e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && isVimMode()) {
+                      e.preventDefault();
+                      exitInsertToNormal();
+                    }
+                  }}
+                />
+              </div>
+            );
+          }}
+        </For>
       </div>
     </div>
   );

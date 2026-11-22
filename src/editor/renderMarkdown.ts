@@ -465,6 +465,7 @@ const IMAGE_REGEX = /!\[([^\]]*)\]\(([^)"\n]+?)(?:\s+"[^"]*")?\)/g;
 const INLINE_TAG_REGEX = /(^|\s)(#[A-Za-z0-9_\-/]+)/g;
 const DISPLAY_INLINE_MATH_REGEX = /\$\$([^$\n]+?)\$\$/g;
 const INLINE_MATH_REGEX = /(?<!\$)\$(?!\$|\s)([^$\n]+?)(?<!\s)\$(?!\$)/g;
+const HR_LINE_REGEX = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
 
 function createImagePreviewField(
   getActiveFilePath: () => string | null,
@@ -738,13 +739,17 @@ function buildInlineDecorations(view: EditorView, mode: "rich" | "minimal"): Dec
           return;
         }
 
-        // Horizontal rule `---` (both rich & minimal)
+        // Prevent `text\n---` from looking like a SetextHeading2 when `---` is used as a horizontal rule
+        if (node.name === "SetextHeading2") {
+          for (let ln = startLine.number; ln < endLine.number; ln++) {
+            const line = state.doc.line(ln);
+            addLineClass(line.from, "cm-rm-setext-reset");
+          }
+          return;
+        }
+
+        // Horizontal rule is handled uniformly per-line below (including `---` directly under text)
         if (node.name === "HorizontalRule") {
-          items.push({
-            from: node.from,
-            to: node.to,
-            deco: Decoration.replace({ widget: new HrWidget() }),
-          });
           return;
         }
 
@@ -868,6 +873,16 @@ function buildInlineDecorations(view: EditorView, mode: "rich" | "minimal"): Dec
 
       // Skip fenced math delimiters `$$` (handled by BlockMathField)
       if (line.text.trim() === "$$") continue;
+
+      // Render standalone horizontal rule lines (`---`, `***`, `___`) even when text is directly above/below
+      if (HR_LINE_REGEX.test(line.text)) {
+        items.push({
+          from: line.from,
+          to: line.to,
+          deco: Decoration.replace({ widget: new HrWidget() }),
+        });
+        continue;
+      }
 
       const mathSpans: Array<[number, number]> = [];
       DISPLAY_INLINE_MATH_REGEX.lastIndex = 0;

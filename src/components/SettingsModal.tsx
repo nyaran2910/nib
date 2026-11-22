@@ -16,10 +16,10 @@ import type { WindowStore } from "../state/store";
 type SectionId = "general" | "ui" | "editor" | "explorer" | "storage" | "hotkeys";
 
 const SECTIONS: Array<{ id: SectionId; label: string; keywords: string }> = [
-  { id: "general", label: "General", keywords: "general theme light dark system startup empty last tab directory" },
+  { id: "general", label: "General", keywords: "general theme light dark system startup empty last tab directory panel resize step" },
   { id: "ui", label: "UI", keywords: "ui tabbar topbar statusbar sidebar search render vim window settings visibility" },
   { id: "editor", label: "Editor", keywords: "editor vim render rich minimal raw frontmatter properties font size line numbers relative absolute width centered full auto save" },
-  { id: "explorer", label: "Explorer", keywords: "explorer keymap vim emacs" },
+  { id: "explorer", label: "Containers", keywords: "containers explorer properties keymap vim emacs standard" },
   { id: "storage", label: "Images", keywords: "image storage folder webp quality cloudflare r2 bucket key trash" },
   { id: "hotkeys", label: "Hotkeys", keywords: "keybinding hotkey shortcut command" },
 ];
@@ -494,6 +494,30 @@ export function SettingsModal(props: { store: WindowStore }) {
                       </Show>
                     </div>
                   </div>
+
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("panel resize step px") ? "is-search-match" : ""}`}
+                  >
+                    <span>Panel resize step (px)</span>
+                    <input
+                      class="nib-input"
+                      type="number"
+                      min="1"
+                      max="200"
+                      style={{ width: "86px" }}
+                      value={draft().appearance.panel_resize_step}
+                      onInput={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          appearance: {
+                            ...p.appearance,
+                            panel_resize_step: Math.max(1, Number(e.currentTarget.value) || 5),
+                          },
+                        }))
+                      }
+                    />
+                  </div>
                 </section>
               </Show>
 
@@ -790,9 +814,9 @@ export function SettingsModal(props: { store: WindowStore }) {
                 <section class="nib-settings-section">
                   <div
                     data-setting-row
-                    class={`nib-setting-row ${rowMatches("explorer keymap vim emacs") ? "is-search-match" : ""}`}
+                    class={`nib-setting-row ${rowMatches("explorer keymap vim emacs standard") ? "is-search-match" : ""}`}
                   >
-                    <span>Keymap</span>
+                    <span>Explorer keymap</span>
                     <select
                       class="nib-input"
                       value={draft().explorer.keymap_mode}
@@ -805,6 +829,26 @@ export function SettingsModal(props: { store: WindowStore }) {
                     >
                       <option value="vim">Vim</option>
                       <option value="emacs">Emacs</option>
+                      <option value="standard">Standard</option>
+                    </select>
+                  </div>
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("properties keymap vim standard") ? "is-search-match" : ""}`}
+                  >
+                    <span>Properties keymap</span>
+                    <select
+                      class="nib-input"
+                      value={draft().properties.keymap_mode}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          properties: { ...p.properties, keymap_mode: e.currentTarget.value },
+                        }))
+                      }
+                    >
+                      <option value="vim">Vim</option>
+                      <option value="standard">Standard</option>
                     </select>
                   </div>
                 </section>

@@ -26,6 +26,7 @@ export interface EditorConfig {
 export interface AppearanceConfig {
   theme: "system" | "light" | "dark" | string;
   sidebar_width: number;
+  panel_resize_step: number;
 }
 
 export interface UiVisibilityConfig {
@@ -41,7 +42,11 @@ export interface UiVisibilityConfig {
 }
 
 export interface ExplorerConfig {
-  keymap_mode: "vim" | "emacs" | string;
+  keymap_mode: "vim" | "emacs" | "standard" | string;
+}
+
+export interface PropertiesConfig {
+  keymap_mode: "vim" | "standard" | string;
 }
 
 export interface StorageConfig {
@@ -77,6 +82,7 @@ export interface AppConfig {
   appearance: AppearanceConfig;
   ui: UiVisibilityConfig;
   explorer: ExplorerConfig;
+  properties: PropertiesConfig;
   keybindings: Record<string, string>;
   storage: StorageConfig;
 }
@@ -147,6 +153,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   appearance: {
     theme: "system",
     sidebar_width: 248,
+    panel_resize_step: 5,
   },
   ui: {
     show_topbar: true,
@@ -162,6 +169,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   explorer: {
     keymap_mode: "vim",
   },
+  properties: {
+    keymap_mode: "vim",
+  },
   keybindings: {
     "nib:save": "Mod-s",
     "nib:new-note": "Mod-n",
@@ -174,6 +184,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     "nib:toggle-left-panel": "Mod-Shift-s",
     "nib:toggle-right-panel": "Mod-Shift-.",
     "nib:toggle-bottom-panel": "Mod-Shift-b",
+    "nib:resize-panel-left": "Ctrl-Alt-h",
+    "nib:resize-panel-right": "Ctrl-Alt-l",
+    "nib:resize-panel-up": "Ctrl-Alt-k",
+    "nib:resize-panel-down": "Ctrl-Alt-j",
     "nib:toggle-vim": "Mod-Shift-v",
     "nib:cycle-render-mode": "Mod-Shift-m",
     "nib:open-settings": "Mod-,",

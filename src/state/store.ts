@@ -65,6 +65,18 @@ export interface ContainerTab {
   dirty?: boolean;
 }
 
+export interface ContainerDragState {
+  containerId: string;
+  title: string;
+  kind: ContainerKind;
+  x: number;
+  y: number;
+  hoverPaneId: string | null;
+  hoverPanel: PanelId | null;
+}
+
+export type PanelResizeDirection = "grow" | "shrink" | "left" | "right" | "up" | "down";
+
 let containerCounter = 1;
 let paneCounter = 10;
 
@@ -124,7 +136,7 @@ export function createWindowStore() {
     bottom: "pane-bottom-1",
   });
   const [activeEditorId, setActiveEditorId] = createSignal<string>(initialEditor.id);
-  const [draggingContainerId, setDraggingContainerId] = createSignal<string | null>(null);
+  const [dragState, setDragState] = createSignal<ContainerDragState | null>(null);
   const [fileLoadVersion, setFileLoadVersion] = createSignal<number>(0);
 
   const [leftVisible, setLeftVisible] = createSignal<boolean>(
@@ -132,7 +144,15 @@ export function createWindowStore() {
   );
   const [rightVisible, setRightVisible] = createSignal<boolean>(false);
   const [bottomVisible, setBottomVisible] = createSignal<boolean>(false);
+  const [leftPanelWidth, setLeftPanelWidth] = createSignal<number>(DEFAULT_CONFIG.appearance.sidebar_width);
+  const [rightPanelWidth, setRightPanelWidth] = createSignal<number>(DEFAULT_CONFIG.appearance.sidebar_width);
+  const [bottomPanelHeight, setBottomPanelHeight] = createSignal<number>(220);
+  const [paneWeights, setPaneWeights] = createSignal<Record<string, number>>({});
   const [mobileTabsOpen, setMobileTabsOpen] = createSignal<boolean>(false);
+
+  const paneWeight = (paneId: string): number => paneWeights()[paneId] ?? 1;
+  let lastDragFinishedAt = 0;
+  const wasJustDragged = () => Date.now() - lastDragFinishedAt < 180;
 
   // Derived helpers
   const panesInPanel = (panel: PanelId) => panes().filter((p) => p.panel === panel);
@@ -525,15 +545,158 @@ export function createWindowStore() {
     const basePane = getPane(sourcePaneId ?? activePaneId()) ?? panesInPanel("center")[0];
     if (!basePane) return;
     const newPane = createPaneInPanel(basePane.panel);
-    const fresh = makeEmptyEditorContainer(newPane.id);
-    setContainers((prev) => [...prev, fresh]);
-    updatePane(newPane.id, { activeContainerId: fresh.id });
     setPanelVisible(basePane.panel, true);
     setActivePaneId(newPane.id);
     setLastPaneByPanel((prev) => ({ ...prev, [basePane.panel]: newPane.id }));
-    setActiveEditorId(fresh.id);
-    setFileLoadVersion((v) => v + 1);
-    queueMicrotask(() => editorFocusMap.get(fresh.id)?.());
+  };
+
+  const openContainerKindInPane = (paneId: string, kind: ContainerKind) => {
+    const pane = getPane(paneId);
+    if (!pane) return;
+    if (kind === "editor") {
+      openEmptyTab(paneId);
+      return;
+    }
+    const existing = containers().find((c) => c.kind === kind);
+    if (existing) {
+      if (existing.paneId === paneId) {
+        void selectContainer(existing.id, true);
+      } else {
+        moveContainerToPane(existing.id, paneId);
+      }
+      return;
+    }
+    const created: ContainerTab = {
+      id: `container-${kind}-${containerCounter++}`,
+      kind,
+      paneId,
+      title: kind === "explorer" ? "Explorer" : "Properties",
+    };
+    setContainers((prev) => [...prev, created]);
+    updatePane(paneId, { activeContainerId: created.id });
+    setPanelVisible(pane.panel, true);
+    setActivePaneId(paneId);
+    setLastPaneByPanel((prev) => ({ ...prev, [pane.panel]: paneId }));
+  };
+
+  const startContainerDrag = (containerId: string, e: PointerEvent) => {
+    if (e.button !== 0) return;
+    const targetEl = e.target as HTMLElement | null;
+    if (targetEl?.closest("button")) return;
+
+    const container = containers().find((c) => c.id === containerId);
+    if (!container) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let active = false;
+
+    const detectDropTarget = (x: number, y: number) => {
+      const els = document.elementsFromPoint(x, y);
+      let hoverPanel: PanelId | null = null;
+      let hoverPaneId: string | null = null;
+      for (const el of els) {
+        const panelAttr = el.getAttribute("data-drop-panel") as PanelId | null;
+        if (panelAttr) {
+          hoverPanel = panelAttr;
+          break;
+        }
+        const paneAttr = el.getAttribute("data-drop-pane");
+        if (paneAttr && !hoverPaneId) {
+          hoverPaneId = paneAttr;
+        }
+      }
+      return { hoverPanel, hoverPaneId };
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return;
+        active = true;
+      }
+      const { hoverPanel, hoverPaneId } = detectDropTarget(ev.clientX, ev.clientY);
+      setDragState({
+        containerId,
+        title: container.title,
+        kind: container.kind,
+        x: ev.clientX,
+        y: ev.clientY,
+        hoverPaneId,
+        hoverPanel,
+      });
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onCancel, true);
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      cleanup();
+      if (!active) return;
+      lastDragFinishedAt = Date.now();
+      const { hoverPanel, hoverPaneId } = detectDropTarget(ev.clientX, ev.clientY);
+      setDragState(null);
+      if (hoverPanel) {
+        moveContainerToPanel(containerId, hoverPanel);
+      } else if (hoverPaneId) {
+        moveContainerToPane(containerId, hoverPaneId);
+      }
+    };
+
+    const onCancel = () => {
+      cleanup();
+      setDragState(null);
+    };
+
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onCancel, true);
+  };
+
+  const resizeFocusedPanel = (dir: PanelResizeDirection) => {
+    const step = Math.max(1, config().appearance.panel_resize_step || 5);
+    const panel = focusedPanel();
+    const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
+
+    if (panel === "left") {
+      const delta = dir === "grow" || dir === "right" || dir === "up" ? step : -step;
+      setLeftPanelWidth((w) => clamp(w + delta, 160, 640));
+      return;
+    }
+    if (panel === "right") {
+      const delta = dir === "grow" || dir === "left" || dir === "up" ? step : -step;
+      setRightPanelWidth((w) => clamp(w + delta, 160, 640));
+      return;
+    }
+    if (panel === "bottom") {
+      const delta = dir === "grow" || dir === "up" || dir === "right" ? step : -step;
+      setBottomPanelHeight((h) => clamp(h + delta, 100, 560));
+      return;
+    }
+
+    // Main Panel focused: resize focused split Pane if >1 Panes, else adjust adjacent open panel
+    const centerPanes = panesInPanel("center");
+    if (centerPanes.length > 1) {
+      const curId = activePaneId();
+      const delta = (dir === "grow" || dir === "right" || dir === "up" ? step : -step) / 120;
+      setPaneWeights((prev) => ({
+        ...prev,
+        [curId]: clamp((prev[curId] ?? 1) + delta, 0.25, 4),
+      }));
+      return;
+    }
+    if ((dir === "up" || dir === "down") && isPanelVisible("bottom")) {
+      const delta = dir === "up" ? step : -step;
+      setBottomPanelHeight((h) => clamp(h + delta, 100, 560));
+    } else if (isPanelVisible("left")) {
+      const delta = dir === "right" || dir === "grow" ? step : -step;
+      setLeftPanelWidth((w) => clamp(w + delta, 160, 640));
+    } else if (isPanelVisible("right")) {
+      const delta = dir === "left" || dir === "grow" ? step : -step;
+      setRightPanelWidth((w) => clamp(w + delta, 160, 640));
+    }
   };
 
   const closePane = async (paneId: string) => {
@@ -978,6 +1141,12 @@ export function createWindowStore() {
       { id: "nib:toggle-left-panel", title: "Toggle Left Side Panel", category: "Panel", defaultKeybinding: "Mod-Shift-s", run: () => void togglePanel("left") },
       { id: "nib:toggle-right-panel", title: "Toggle Right Side Panel", category: "Panel", defaultKeybinding: "Mod-Shift-.", run: () => void togglePanel("right") },
       { id: "nib:toggle-bottom-panel", title: "Toggle Bottom Panel", category: "Panel", defaultKeybinding: "Mod-Shift-b", run: () => void togglePanel("bottom") },
+      { id: "nib:resize-panel-grow", title: "Resize Panel: Grow", category: "Panel", run: () => resizeFocusedPanel("grow") },
+      { id: "nib:resize-panel-shrink", title: "Resize Panel: Shrink", category: "Panel", run: () => resizeFocusedPanel("shrink") },
+      { id: "nib:resize-panel-left", title: "Resize Panel: Left", category: "Panel", defaultKeybinding: "Ctrl-Alt-h", run: () => resizeFocusedPanel("left") },
+      { id: "nib:resize-panel-right", title: "Resize Panel: Right", category: "Panel", defaultKeybinding: "Ctrl-Alt-l", run: () => resizeFocusedPanel("right") },
+      { id: "nib:resize-panel-up", title: "Resize Panel: Up", category: "Panel", defaultKeybinding: "Ctrl-Alt-k", run: () => resizeFocusedPanel("up") },
+      { id: "nib:resize-panel-down", title: "Resize Panel: Down", category: "Panel", defaultKeybinding: "Ctrl-Alt-j", run: () => resizeFocusedPanel("down") },
       { id: "nib:focus-explorer", title: "Focus Explorer", category: "Container", run: () => focusKind("explorer") },
       { id: "nib:focus-properties", title: "Focus Properties", category: "Container", run: () => focusKind("properties") },
       { id: "nib:toggle-topbar", title: "Toggle Tab Bar", category: "View", run: () => void toggleTopbar() },
@@ -1011,6 +1180,8 @@ export function createWindowStore() {
 
     const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
     setLeftVisible(isMobile ? false : local.sidebar_visible);
+    setLeftPanelWidth(initialConfig.appearance.sidebar_width);
+    setRightPanelWidth(initialConfig.appearance.sidebar_width);
     setConfig(initialConfig);
     setConfigPaths(paths);
     setR2CredsStatus(creds);
@@ -1062,14 +1233,20 @@ export function createWindowStore() {
     focusPane,
     focusMainPanel,
     focusEditor: focusActiveEditor,
-    draggingContainerId,
-    setDraggingContainerId,
+    dragState,
+    startContainerDrag,
+    wasJustDragged,
     leftVisible,
     setLeftVisible,
     rightVisible,
     setRightVisible,
     bottomVisible,
     setBottomVisible,
+    leftPanelWidth,
+    rightPanelWidth,
+    bottomPanelHeight,
+    paneWeight,
+    resizeFocusedPanel,
     isPanelVisible,
     setPanelVisible,
     togglePanel,
@@ -1082,6 +1259,7 @@ export function createWindowStore() {
     moveContainerToPane,
     moveContainerToPanel,
     openEmptyTab,
+    openContainerKindInPane,
     splitPane,
     closePane,
     closeTab,

@@ -373,6 +373,12 @@
   background: var(--nib-border-strong);
 }
 
+/* Reset CommonMark SetextHeading2 bolding when `---` is directly below text */
+.cm-rm-setext-reset,
+.cm-rm-setext-reset span {
+  font-weight: 400 !important;
+}
+
 /* Tables: zero horizontal padding shift */
 .cm-rm-table-line {
   font-family: var(--nib-font-mono);

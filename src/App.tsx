@@ -32,8 +32,21 @@ const PUNCT_CODE_MAP: Record<string, { code: string; shifted?: string }> = {
   "\\": { code: "Backslash", shifted: "|" },
 };
 
+const SPECIAL_CODE_MAP: Record<string, string> = {
+  left: "ArrowLeft",
+  arrowleft: "ArrowLeft",
+  right: "ArrowRight",
+  arrowright: "ArrowRight",
+  up: "ArrowUp",
+  arrowup: "ArrowUp",
+  down: "ArrowDown",
+  arrowdown: "ArrowDown",
+};
+
 function matchesKeyToken(e: KeyboardEvent, key: string): boolean {
   if (e.key.toLowerCase() === key) return true;
+  const special = SPECIAL_CODE_MAP[key];
+  if (special) return e.code === special || e.key === special;
   const punct = PUNCT_CODE_MAP[key];
   if (punct) {
     return e.code === punct.code || (punct.shifted !== undefined && e.key === punct.shifted);
@@ -163,16 +176,8 @@ export function App() {
 
   const makeDropEdge = (panel: PanelId, label: string) => (
     <div
-      class={`nib-drop-edge nib-drop-edge-${panel}`}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        const id = store.draggingContainerId() ?? e.dataTransfer?.getData("text/nib-tab");
-        if (id) {
-          store.moveContainerToPanel(id, panel);
-          store.setDraggingContainerId(null);
-        }
-      }}
+      data-drop-panel={panel}
+      class={`nib-drop-edge nib-drop-edge-${panel} ${store.dragState()?.hoverPanel === panel ? "is-hover" : ""}`}
     >
       {label}
     </div>
@@ -244,12 +249,27 @@ export function App() {
         </Show>
 
         {/* Drag-to-dock edges when dragging any Container tab */}
-        <Show when={store.draggingContainerId()}>
+        <Show when={store.dragState()}>
           <Show when={!store.isPanelVisible("left")}>{makeDropEdge("left", "Left")}</Show>
           <Show when={!store.isPanelVisible("right")}>{makeDropEdge("right", "Right")}</Show>
           <Show when={!store.isPanelVisible("bottom")}>{makeDropEdge("bottom", "Bottom")}</Show>
         </Show>
       </div>
+
+      {/* Floating drag ghost pill */}
+      <Show when={store.dragState()}>
+        {(drag) => (
+          <div
+            class="nib-drag-ghost"
+            style={{
+              left: `${drag().x + 12}px`,
+              top: `${drag().y + 12}px`,
+            }}
+          >
+            {drag().title}
+          </div>
+        )}
+      </Show>
 
       {/* Obsidian iOS / SwiftUI Frosted Bottom Navigation Bar */}
       <nav class="nib-ios-tabbar" aria-label="Mobile Navigation">

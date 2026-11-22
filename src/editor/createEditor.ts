@@ -20,7 +20,7 @@ import type { AppConfig, LineNumberMode, StorageConfig } from "../state/ipc";
 import { pluginRegistry } from "../plugins/registry";
 import { createImagePasteExtension } from "./imagePaste";
 import { createRenderMarkdownExtension } from "./renderMarkdown";
-import { createVimExtension, type VimModeLabel } from "./vimExtension";
+import { createMacEmacsInsertKeymap, createVimExtension, type VimModeLabel } from "./vimExtension";
 
 export interface CursorMetrics {
   line: number;
@@ -186,6 +186,7 @@ export function createNibEditor(params: CreateEditorParams): NibEditorController
   const state = EditorState.create({
     doc: params.initialContent,
     extensions: [
+      createMacEmacsInsertKeymap(),
       vimCompartment.of(makeVimExt(params.config)),
       history(),
       drawSelection(),

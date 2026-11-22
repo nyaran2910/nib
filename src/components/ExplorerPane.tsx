@@ -4,11 +4,9 @@ import {
   ChevronRight,
   CopyPlus,
   ExternalLink,
-  FilePlus,
   FileText,
   Folder,
   FolderOpen,
-  FolderPlus,
   Pencil,
   Search,
   Trash2,
@@ -215,6 +213,10 @@ export function ExplorerPane(props: { store: WindowStore; paneId: string }) {
       return;
     }
 
+    if (mode === "standard") {
+      return;
+    }
+
     if (mode === "emacs") {
       if (e.ctrlKey && e.key === "f") {
         e.preventDefault();
@@ -335,36 +337,6 @@ export function ExplorerPane(props: { store: WindowStore; paneId: string }) {
 
   return (
     <div class="nib-explorer-pane">
-      <div class="nib-explorer-toolbar">
-        <span class="nib-sidebar-title" />
-        <div class="nib-sidebar-actions">
-          <button
-            class="nib-icon-btn"
-            title="New Note"
-            onClick={() => void props.store.createNewNote()}
-          >
-            <FilePlus size={14} />
-          </button>
-          <button
-            class="nib-icon-btn"
-            title="New Folder"
-            onClick={() => {
-              if (!props.store.rootDir()) void props.store.openFolderPicker();
-              else props.store.setSidebarCreateMode("folder");
-            }}
-          >
-            <FolderPlus size={14} />
-          </button>
-          <button
-            class="nib-icon-btn"
-            title="Open Folder"
-            onClick={() => void props.store.openFolderPicker()}
-          >
-            <FolderOpen size={14} />
-          </button>
-        </div>
-      </div>
-
       <Show when={props.store.config().ui.show_sidebar_search}>
         <div class="nib-sidebar-search-wrap">
           <button

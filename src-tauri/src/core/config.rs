@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub appearance: AppearanceConfig,
     pub ui: UiVisibilityConfig,
     pub explorer: ExplorerConfig,
+    pub properties: PropertiesConfig,
     /// Maps command IDs (e.g. "nib:save", "nib:search-omni") to key sequences
     pub keybindings: HashMap<String, String>,
     pub storage: StorageConfig,
@@ -47,6 +48,8 @@ pub struct AppearanceConfig {
     /// "system" | "light" | "dark"
     pub theme: String,
     pub sidebar_width: u16,
+    /// Pixel delta per panel resize step (e.g. 5px)
+    pub panel_resize_step: u16,
 }
 
 /// Fine-grained visibility toggles for every UI chrome element.
@@ -67,7 +70,14 @@ pub struct UiVisibilityConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExplorerConfig {
-    /// "vim" (Snacks.nvim style) | "emacs" (Ctrl+N/P/F/B)
+    /// "vim" | "emacs" | "standard"
+    pub keymap_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PropertiesConfig {
+    /// "vim" (j/k/h/l + i/o/d/Esc) | "standard"
     pub keymap_mode: String,
 }
 
@@ -177,6 +187,7 @@ impl Default for AppearanceConfig {
         Self {
             theme: "system".to_string(),
             sidebar_width: 248,
+            panel_resize_step: 5,
         }
     }
 }
@@ -198,6 +209,14 @@ impl Default for UiVisibilityConfig {
 }
 
 impl Default for ExplorerConfig {
+    fn default() -> Self {
+        Self {
+            keymap_mode: "vim".to_string(),
+        }
+    }
+}
+
+impl Default for PropertiesConfig {
     fn default() -> Self {
         Self {
             keymap_mode: "vim".to_string(),
@@ -235,6 +254,10 @@ impl Default for AppConfig {
         keybindings.insert("nib:toggle-left-panel".into(), "Mod-Shift-s".into());
         keybindings.insert("nib:toggle-right-panel".into(), "Mod-Shift-.".into());
         keybindings.insert("nib:toggle-bottom-panel".into(), "Mod-Shift-b".into());
+        keybindings.insert("nib:resize-panel-left".into(), "Ctrl-Alt-h".into());
+        keybindings.insert("nib:resize-panel-right".into(), "Ctrl-Alt-l".into());
+        keybindings.insert("nib:resize-panel-up".into(), "Ctrl-Alt-k".into());
+        keybindings.insert("nib:resize-panel-down".into(), "Ctrl-Alt-j".into());
         keybindings.insert("nib:toggle-vim".into(), "Mod-Shift-v".into());
         keybindings.insert("nib:cycle-render-mode".into(), "Mod-Shift-m".into());
         keybindings.insert("nib:open-settings".into(), "Mod-,".into());
@@ -251,6 +274,7 @@ impl Default for AppConfig {
             appearance: AppearanceConfig::default(),
             ui: UiVisibilityConfig::default(),
             explorer: ExplorerConfig::default(),
+            properties: PropertiesConfig::default(),
             keybindings,
             storage: StorageConfig::default(),
         }

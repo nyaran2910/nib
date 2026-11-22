@@ -2,6 +2,7 @@ import {
   Columns2,
   Command,
   CopyPlus,
+  FileText,
   Files,
   PanelLeft,
   Plus,
@@ -13,10 +14,111 @@ import {
   X,
 } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
-import type { ContainerTab, PanelId, WindowStore } from "../state/store";
+import type { ContainerKind, ContainerTab, PanelId, WindowStore } from "../state/store";
 import { EditorView } from "./EditorView";
 import { ExplorerPane } from "./ExplorerPane";
 import { PropertiesPanel } from "./PropertiesPanel";
+
+const CONTAINER_REGISTRY: Array<{ kind: ContainerKind; title: string; keywords: string }> = [
+  { kind: "editor", title: "Editor", keywords: "editor markdown note write text" },
+  { kind: "explorer", title: "Explorer", keywords: "explorer files folder tree sidebar" },
+  { kind: "properties", title: "Properties", keywords: "properties frontmatter yaml metadata tags" },
+];
+
+function ContainerPicker(props: { store: WindowStore; paneId: string; isFocused: () => boolean }) {
+  let inputRef: HTMLInputElement | undefined;
+  const [query, setQuery] = createSignal("");
+  const [selectedIdx, setSelectedIdx] = createSignal(0);
+
+  const filtered = createMemo(() => {
+    const q = query().trim().toLowerCase();
+    if (!q) return CONTAINER_REGISTRY;
+    return CONTAINER_REGISTRY.filter((c) => `${c.title} ${c.keywords}`.toLowerCase().includes(q));
+  });
+
+  createEffect(() => {
+    filtered();
+    setSelectedIdx(0);
+  });
+
+  createEffect(() => {
+    if (props.isFocused() && document.activeElement !== inputRef) {
+      queueMicrotask(() => inputRef?.focus());
+    }
+  });
+
+  const openChosen = (kind?: ContainerKind) => {
+    const chosen = kind ?? filtered()[selectedIdx()]?.kind;
+    if (!chosen) return;
+    props.store.openContainerKindInPane(props.paneId, chosen);
+  };
+
+  const renderIcon = (kind: ContainerKind) => {
+    if (kind === "editor") return <FileText size={14} />;
+    if (kind === "explorer") return <Files size={14} />;
+    return <SlidersHorizontal size={14} />;
+  };
+
+  return (
+    <div class="nib-empty-pane">
+      <div class="nib-container-picker">
+        <div class="nib-container-picker-input-row">
+          <Search size={13} class="nib-container-picker-ico" />
+          <input
+            ref={inputRef}
+            class="nib-container-picker-input"
+            type="text"
+            placeholder="Container…"
+            value={query()}
+            onFocus={() => {
+              if (props.store.activePaneId() !== props.paneId) {
+                props.store.focusPane(props.paneId, false);
+              }
+            }}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              const list = filtered();
+              if (e.key === "Escape") {
+                e.preventDefault();
+                if (query().length > 0) setQuery("");
+                else props.store.focusMainPanel();
+                return;
+              }
+              if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+                e.preventDefault();
+                if (list.length > 0) setSelectedIdx((i) => (i + 1) % list.length);
+                return;
+              }
+              if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+                e.preventDefault();
+                if (list.length > 0) setSelectedIdx((i) => (i - 1 + list.length) % list.length);
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                openChosen();
+              }
+            }}
+          />
+        </div>
+        <div class="nib-container-picker-list">
+          <For each={filtered()}>
+            {(item, idx) => (
+              <button
+                class={`nib-container-picker-item ${idx() === selectedIdx() ? "is-active" : ""}`}
+                onMouseEnter={() => setSelectedIdx(idx())}
+                onClick={() => openChosen(item.kind)}
+              >
+                {renderIcon(item.kind)}
+                <span>{item.title}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PaneView(props: {
   store: WindowStore;
@@ -24,9 +126,6 @@ function PaneView(props: {
   paneIndex: () => number;
   totalPanes: () => number;
 }) {
-  let emptyPaneRef: HTMLDivElement | undefined;
-  const [dragOver, setDragOver] = createSignal(false);
-
   const panel = createMemo(() => props.store.panelOfPane(props.paneId));
   const tabIds = createMemo(() =>
     props.store.containersInPane(props.paneId).map((c) => c.id),
@@ -36,33 +135,14 @@ function PaneView(props: {
     props.store.activeContainerInPane(props.paneId),
   );
   const isPaneFocused = () => props.store.activePaneId() === props.paneId;
+  const isDragTarget = () => props.store.dragState()?.hoverPaneId === props.paneId;
   const ui = () => props.store.config().ui;
   const showHeader = () => (panel() === "center" ? ui().show_topbar : true);
   const needsTrafficLightPad = () =>
     props.paneIndex() === 0 &&
     (panel() === "left" || (panel() === "center" && !props.store.isPanelVisible("left")));
-
-  createEffect(() => {
-    if (isPaneFocused() && !activeTab() && document.activeElement !== emptyPaneRef) {
-      queueMicrotask(() => emptyPaneRef?.focus());
-    }
-  });
-
-  const handleDragOver = (e: DragEvent) => {
-    if (!props.store.draggingContainerId()) return;
-    e.preventDefault();
-    setDragOver(true);
-  };
-
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const id = props.store.draggingContainerId() ?? e.dataTransfer?.getData("text/nib-tab");
-    if (id) {
-      props.store.moveContainerToPane(id, props.paneId);
-      props.store.setDraggingContainerId(null);
-    }
-  };
+  const allowWindowDrag = () =>
+    props.paneIndex() === 0 && (panel() === "left" || panel() === "center");
 
   const renderNonEditorIcon = (kind: ContainerTab["kind"]) => {
     if (kind === "explorer") return <Files size={15} />;
@@ -71,10 +151,9 @@ function PaneView(props: {
 
   return (
     <div
-      class={`nib-pane ${isPaneFocused() ? "is-pane-focused" : ""} ${dragOver() ? "is-drag-over" : ""}`}
-      onDragOver={handleDragOver}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={handleDrop}
+      data-drop-pane={props.paneId}
+      class={`nib-pane ${isPaneFocused() ? "is-pane-focused" : ""} ${isDragTarget() ? "is-drag-over" : ""}`}
+      style={{ flex: `${props.store.paneWeight(props.paneId)} 1 0%` }}
       onMouseDown={() => {
         if (props.store.activePaneId() !== props.paneId) {
           props.store.focusPane(props.paneId, false);
@@ -82,14 +161,7 @@ function PaneView(props: {
       }}
     >
       <Show when={showHeader()}>
-        <header
-          class={`nib-dock-header ${needsTrafficLightPad() ? "is-left-chrome" : ""}`}
-          data-tauri-drag-region={
-            props.paneIndex() === 0 && (panel() === "left" || panel() === "center")
-              ? ""
-              : undefined
-          }
-        >
+        <header class={`nib-dock-header ${needsTrafficLightPad() ? "is-left-chrome" : ""}`}>
           <Show when={panel() === "center" && props.paneIndex() === 0}>
             <button
               class="nib-icon-btn"
@@ -109,21 +181,18 @@ function PaneView(props: {
                 const tab = () => getTab(tabId);
                 const isActive = () => activeTab()?.id === tabId;
                 const isEditor = () => tab()?.kind === "editor";
+                const isBeingDragged = () => props.store.dragState()?.containerId === tabId;
                 return (
                   <Show when={tab()}>
                     {(t) => (
                       <div
                         role="tab"
                         aria-selected={isActive()}
-                        draggable={true}
-                        onDragStart={(e) => {
-                          props.store.setDraggingContainerId(tabId);
-                          e.dataTransfer?.setData("text/nib-tab", tabId);
-                        }}
-                        onDragEnd={() => props.store.setDraggingContainerId(null)}
-                        class={`nib-tab ${isEditor() ? "nib-tab-editor" : "nib-tab-icon-only"} ${isActive() ? "is-active" : ""}`}
+                        class={`nib-tab ${isEditor() ? "nib-tab-editor" : "nib-tab-icon-only"} ${isActive() ? "is-active" : ""} ${isBeingDragged() ? "is-dragging" : ""}`}
+                        onPointerDown={(e) => props.store.startContainerDrag(tabId, e)}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (props.store.wasJustDragged()) return;
                           void props.store.selectContainer(tabId, true);
                         }}
                         onMouseDown={(e) => {
@@ -158,7 +227,7 @@ function PaneView(props: {
               }}
             </For>
 
-            <Show when={panel() === "center" || tabIds().length === 0}>
+            <Show when={panel() === "center" && tabIds().length > 0}>
               <button
                 class="nib-icon-btn nib-tab-new"
                 title="New Tab"
@@ -170,6 +239,12 @@ function PaneView(props: {
                 <Plus size={14} />
               </button>
             </Show>
+
+            {/* Dedicated window drag spacer so macOS titlebar dragging NEVER hijacks container tabs */}
+            <div
+              class="nib-drag-spacer"
+              data-tauri-drag-region={allowWindowDrag() ? "" : undefined}
+            />
           </div>
 
           <div class="nib-pane-actions">
@@ -203,24 +278,11 @@ function PaneView(props: {
         <Show
           when={activeTab()}
           fallback={
-            <div
-              ref={emptyPaneRef}
-              class="nib-empty-pane"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  props.store.focusMainPanel();
-                }
-              }}
-            >
-              <button
-                class="nib-secondary-btn"
-                onClick={() => props.store.openEmptyTab(props.paneId)}
-              >
-                New Tab
-              </button>
-            </div>
+            <ContainerPicker
+              store={props.store}
+              paneId={props.paneId}
+              isFocused={isPaneFocused}
+            />
           }
         >
           {(tab) => (
@@ -245,7 +307,6 @@ function PaneView(props: {
 }
 
 export function DockPanel(props: { store: WindowStore; panel: PanelId }) {
-  // Key <For> by primitive pane ID so updating pane state NEVER destroys/remounts PaneView
   const paneIds = createMemo(() =>
     props.store.panesInPanel(props.panel).map((p) => p.id),
   );
@@ -253,14 +314,17 @@ export function DockPanel(props: { store: WindowStore; panel: PanelId }) {
   const ui = () => props.store.config().ui;
   const renderMode = () => props.store.config().editor.render_mode;
 
+  const panelStyle = () => {
+    if (props.panel === "left") return { width: `${props.store.leftPanelWidth()}px` };
+    if (props.panel === "right") return { width: `${props.store.rightPanelWidth()}px` };
+    if (props.panel === "bottom") return { height: `${props.store.bottomPanelHeight()}px` };
+    return undefined;
+  };
+
   return (
     <section
       class={`nib-dock nib-dock-${props.panel} ${isPanelFocused() ? "is-zone-focused" : ""}`}
-      style={
-        props.panel === "left" || props.panel === "right"
-          ? { width: `${props.store.config().appearance.sidebar_width}px` }
-          : undefined
-      }
+      style={panelStyle()}
     >
       <div
         class={`nib-panel-panes ${props.panel === "left" || props.panel === "right" ? "is-vertical" : "is-horizontal"}`}

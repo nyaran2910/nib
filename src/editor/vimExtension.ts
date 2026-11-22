@@ -1,6 +1,36 @@
-import { StateEffect, StateField, type Extension } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { Vim, getCM, vim, type CM5RangeInterface, type CodeMirrorV, type OperatorArgs, type Pos } from "@replit/codemirror-vim";
+import {
+  cursorCharLeft,
+  cursorCharRight,
+  cursorLineDown,
+  cursorLineEnd,
+  cursorLineStart,
+  cursorLineUp,
+  deleteCharBackward,
+  deleteCharForward,
+  deleteGroupBackward,
+  deleteToLineEnd,
+  deleteToLineStart,
+  splitLine,
+  transposeChars,
+} from "@codemirror/commands";
+import { Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+  keymap,
+} from "@codemirror/view";
+import {
+  Vim,
+  getCM,
+  vim,
+  type CM5RangeInterface,
+  type CodeMirrorV,
+  type OperatorArgs,
+  type Pos,
+} from "@replit/codemirror-vim";
 
 export type VimModeLabel = "NORMAL" | "INSERT" | "VISUAL" | "V-LINE" | "V-BLOCK" | "REPLACE";
 
@@ -96,7 +126,6 @@ function registerGlobalVimEnhancements(): void {
       const linewise = Boolean(args.linewise || args.fullLine || vimState?.visualLine);
       const doc = view.state.doc;
 
-      // Upstream cm.getSelection() already preserves exact linewise newlines & visual-block text
       const yankedText = cm.getSelection();
       const endPos = vimState?.visualMode
         ? cursorMin(vimState.sel?.anchor, vimState.sel?.head, ranges[0]?.head, ranges[0]?.anchor)
@@ -131,7 +160,6 @@ function registerGlobalVimEnhancements(): void {
         Boolean(vimState?.visualBlock),
       );
 
-      // Sync to system clipboard when yanking to unnamed, +, or * registers
       if (!args.registerName || args.registerName === "+" || args.registerName === "*") {
         navigator.clipboard?.writeText(yankedText).catch(() => {});
       }
@@ -144,7 +172,6 @@ function registerGlobalVimEnhancements(): void {
     },
   );
 
-  // Support `:w`, `:q`, and `:wq`
   Vim.defineEx("write", "w", (cm: CodeMirrorV) => {
     const view = cm.cm6 as EditorView;
     viewConfigs.get(view)?.onSave?.();
@@ -161,6 +188,43 @@ function registerGlobalVimEnhancements(): void {
     cfg?.onSave?.();
     cfg?.onQuit?.();
   });
+}
+
+function isInsertOrStandardMode(view: EditorView): boolean {
+  const cm = getCM(view);
+  if (!cm?.state?.vim) return true;
+  return Boolean(cm.state.vim.insertMode);
+}
+
+function insertOnly(cmd: (view: EditorView) => boolean): (view: EditorView) => boolean {
+  return (view) => {
+    if (!isInsertOrStandardMode(view)) return false;
+    return cmd(view);
+  };
+}
+
+/**
+ * Native macOS Emacs editing keys (Ctrl+H/D/A/E/F/B/N/P/K/U/W/O/T) active in Insert & Standard modes,
+ * while passing straight through to Vim in NORMAL/VISUAL modes.
+ */
+export function createMacEmacsInsertKeymap(): Extension {
+  return Prec.highest(
+    keymap.of([
+      { key: "Ctrl-h", run: insertOnly(deleteCharBackward) },
+      { key: "Ctrl-d", run: insertOnly(deleteCharForward) },
+      { key: "Ctrl-a", run: insertOnly(cursorLineStart) },
+      { key: "Ctrl-e", run: insertOnly(cursorLineEnd) },
+      { key: "Ctrl-f", run: insertOnly(cursorCharRight) },
+      { key: "Ctrl-b", run: insertOnly(cursorCharLeft) },
+      { key: "Ctrl-n", run: insertOnly(cursorLineDown) },
+      { key: "Ctrl-p", run: insertOnly(cursorLineUp) },
+      { key: "Ctrl-k", run: insertOnly(deleteToLineEnd) },
+      { key: "Ctrl-u", run: insertOnly(deleteToLineStart) },
+      { key: "Ctrl-w", run: insertOnly(deleteGroupBackward) },
+      { key: "Ctrl-o", run: insertOnly(splitLine) },
+      { key: "Ctrl-t", run: insertOnly(transposeChars) },
+    ]),
+  );
 }
 
 export interface VimExtensionOptions {
@@ -200,7 +264,6 @@ export function createVimExtension(options: VimExtensionOptions): Extension {
           }
         };
 
-        // Attach to CM5 vim adapter after mount
         queueMicrotask(() => {
           const cm = getCM(this.view);
           cm?.on("vim-mode-change", this.modeHandler);
