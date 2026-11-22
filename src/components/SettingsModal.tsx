@@ -3,6 +3,7 @@ import {
   FolderTree,
   Image as ImageIcon,
   Keyboard,
+  Layers,
   Layout,
   Search,
   Sliders,
@@ -13,13 +14,14 @@ import { pluginRegistry } from "../plugins/registry";
 import { suggestDirectories, type AppConfig } from "../state/ipc";
 import type { WindowStore } from "../state/store";
 
-type SectionId = "general" | "ui" | "editor" | "explorer" | "storage" | "hotkeys";
+type SectionId = "general" | "ui" | "editor" | "explorer" | "sessions" | "storage" | "hotkeys";
 
 const SECTIONS: Array<{ id: SectionId; label: string; keywords: string }> = [
   { id: "general", label: "General", keywords: "general theme light dark system startup empty last tab directory panel resize step" },
   { id: "ui", label: "UI", keywords: "ui tabbar topbar statusbar sidebar search render vim window settings visibility" },
   { id: "editor", label: "Editor", keywords: "editor vim render rich minimal raw frontmatter properties font size line numbers relative absolute width centered full auto save" },
   { id: "explorer", label: "Containers", keywords: "containers explorer properties keymap vim emacs standard" },
+  { id: "sessions", label: "Sessions", keywords: "session tmux resurrect restore startup auto save interval ring buffer history" },
   { id: "storage", label: "Images", keywords: "image storage folder webp quality cloudflare r2 bucket key trash" },
   { id: "hotkeys", label: "Hotkeys", keywords: "keybinding hotkey shortcut command" },
 ];
@@ -321,6 +323,8 @@ export function SettingsModal(props: { store: WindowStore }) {
         return <Code2 size={14} />;
       case "explorer":
         return <FolderTree size={14} />;
+      case "sessions":
+        return <Layers size={14} />;
       case "storage":
         return <ImageIcon size={14} />;
       case "hotkeys":
@@ -850,6 +854,73 @@ export function SettingsModal(props: { store: WindowStore }) {
                       <option value="vim">Vim</option>
                       <option value="standard">Standard</option>
                     </select>
+                  </div>
+                </section>
+              </Show>
+
+              <Show when={showSection("sessions")}>
+                <section class="nib-settings-section">
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("restore last session startup") ? "is-search-match" : ""}`}
+                  >
+                    <span>Restore last session on startup</span>
+                    <input
+                      type="checkbox"
+                      checked={draft().session.restore_on_startup}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          session: { ...p.session, restore_on_startup: e.currentTarget.checked },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("auto save interval minutes resurrect") ? "is-search-match" : ""}`}
+                  >
+                    <span>Auto-save interval (min, 0 = off)</span>
+                    <input
+                      class="nib-input"
+                      type="number"
+                      min="0"
+                      max="240"
+                      style={{ width: "86px" }}
+                      value={draft().session.auto_save_interval_min}
+                      onInput={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          session: {
+                            ...p.session,
+                            auto_save_interval_min: Math.max(0, Number(e.currentTarget.value) || 0),
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div
+                    data-setting-row
+                    class={`nib-setting-row ${rowMatches("ring buffer history size") ? "is-search-match" : ""}`}
+                  >
+                    <span>Auto history size</span>
+                    <input
+                      class="nib-input"
+                      type="number"
+                      min="1"
+                      max="50"
+                      style={{ width: "86px" }}
+                      value={draft().session.ring_buffer_size}
+                      onInput={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          session: {
+                            ...p.session,
+                            ring_buffer_size: Math.max(1, Number(e.currentTarget.value) || 8),
+                          },
+                        }))
+                      }
+                    />
                   </div>
                 </section>
               </Show>

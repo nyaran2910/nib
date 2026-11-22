@@ -10,12 +10,15 @@ import {
   createFolder,
   createNote,
   deleteNote,
+  deleteSessionRecord,
   getConfig,
   getConfigPaths,
+  getLastSession,
   getLocalState,
   getStorageCredentialsStatus,
   getWindowLaunchTarget,
   isTauriRuntime,
+  listSessions,
   listTrashedImages,
   movePaths,
   openInDefaultApp,
@@ -29,6 +32,8 @@ import {
   saveGlobalConfig,
   saveLocalState,
   saveR2Credentials,
+  saveSessionSnapshot,
+  syncLiveSession,
   unwatchDirectory,
   writeNote,
   type AppConfig,
@@ -37,6 +42,8 @@ import {
   type LineNumberMode,
   type RenderMode,
   type SearchMode,
+  type SessionRecord,
+  type SessionStoreData,
   type StorageCredentialsStatus,
 } from "./ipc";
 
@@ -44,10 +51,10 @@ import {
  * Official Nib UI Hierarchy:
  *   Window -> Panel ("left" | "center" | "right" | "bottom")
  *          -> Pane (tmux-style split regions inside a Panel; starts with 1, splittable to N)
- *          -> Container (tabs inside a Pane: "editor" | "explorer" | "properties")
+ *          -> Container (tabs inside a Pane: "editor" | "explorer" | "properties" | plugin containers)
  */
 export type PanelId = "left" | "center" | "right" | "bottom";
-export type ContainerKind = "editor" | "explorer" | "properties";
+export type ContainerKind = "editor" | "explorer" | "properties" | (string & {});
 
 export interface PaneNode {
   id: string;
@@ -347,13 +354,29 @@ export function createWindowStore() {
   const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = createSignal<boolean>(false);
   const [searchModalOpen, setSearchModalOpen] = createSignal<boolean>(false);
+  const [sessionModalOpen, setSessionModalOpen] = createSignal<boolean>(false);
   const [searchMode, setSearchMode] = createSignal<SearchMode>("omni");
   const [pendingJumpLine, setPendingJumpLine] = createSignal<number | null>(null);
   const [toast, setToast] = createSignal<string | null>(null);
   const [trashedCount, setTrashedCount] = createSignal<number>(0);
   const [sidebarCreateMode, setSidebarCreateMode] = createSignal<"note" | "folder" | null>(null);
+
+  // tmux-style Session State
+  const [currentSessionId, setCurrentSessionId] = createSignal<string>(
+    `session-${Date.now().toString(36)}`,
+  );
+  const [currentSessionName, setCurrentSessionName] = createSignal<string>("default");
+  const [currentSessionKind, setCurrentSessionKind] = createSignal<"ephemeral" | "named">("ephemeral");
+  const [sessionCreatedAt, setSessionCreatedAt] = createSignal<string>(new Date().toISOString());
+  const [sessionStore, setSessionStore] = createSignal<SessionStoreData>({
+    last_session_id: null,
+    named: [],
+    history: [],
+  });
+
   let toastTimer: number | undefined;
   let autoSaveTimer: number | undefined;
+  let liveSyncTimer: number | undefined;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -557,26 +580,330 @@ export function createWindowStore() {
       openEmptyTab(paneId);
       return;
     }
-    const existing = containers().find((c) => c.kind === kind);
-    if (existing) {
-      if (existing.paneId === paneId) {
-        void selectContainer(existing.id, true);
-      } else {
-        moveContainerToPane(existing.id, paneId);
+    const pluginDef = pluginRegistry.getContainer(kind);
+    const isSingleton = kind === "explorer" || kind === "properties" || pluginDef?.singleton !== false;
+    if (isSingleton) {
+      const existing = containers().find((c) => c.kind === kind);
+      if (existing) {
+        if (existing.paneId === paneId) {
+          void selectContainer(existing.id, true);
+        } else {
+          moveContainerToPane(existing.id, paneId);
+        }
+        return;
       }
-      return;
     }
+    const title =
+      kind === "explorer"
+        ? "Explorer"
+        : kind === "properties"
+          ? "Properties"
+          : pluginDef?.title ?? kind;
     const created: ContainerTab = {
       id: `container-${kind}-${containerCounter++}`,
       kind,
       paneId,
-      title: kind === "explorer" ? "Explorer" : "Properties",
+      title,
     };
     setContainers((prev) => [...prev, created]);
     updatePane(paneId, { activeContainerId: created.id });
     setPanelVisible(pane.panel, true);
     setActivePaneId(paneId);
     setLastPaneByPanel((prev) => ({ ...prev, [pane.panel]: paneId }));
+    scheduleLiveSessionSync();
+  };
+
+  const buildSessionRecord = (overrides?: Partial<SessionRecord>): SessionRecord => {
+    const now = new Date().toISOString();
+    return {
+      id: overrides?.id ?? currentSessionId(),
+      name: overrides?.name ?? currentSessionName(),
+      kind: overrides?.kind ?? currentSessionKind(),
+      root_dir: rootDir(),
+      panes: panes().map((p) => ({
+        id: p.id,
+        panel: p.panel,
+        active_container_id: p.activeContainerId,
+        weight: paneWeight(p.id),
+      })),
+      containers: containers().map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        pane_id: c.paneId,
+        title: c.title,
+        path: c.path ?? null,
+        draft_content: c.kind === "editor" && (c.dirty || !c.path) ? (c.content ?? "") : null,
+        dirty: Boolean(c.dirty),
+      })),
+      active_pane_id: activePaneId(),
+      active_editor_id: activeEditorId(),
+      left_visible: leftVisible(),
+      right_visible: rightVisible(),
+      bottom_visible: bottomVisible(),
+      left_width: leftPanelWidth(),
+      right_width: rightPanelWidth(),
+      bottom_height: bottomPanelHeight(),
+      created_at: overrides?.created_at ?? sessionCreatedAt(),
+      updated_at: now,
+    };
+  };
+
+  const scheduleLiveSessionSync = () => {
+    if (liveSyncTimer !== undefined) window.clearTimeout(liveSyncTimer);
+    liveSyncTimer = window.setTimeout(() => {
+      void syncLiveSession(buildSessionRecord());
+    }, 500);
+  };
+
+  const refreshSessions = async () => {
+    const data = await listSessions();
+    setSessionStore(data);
+    return data;
+  };
+
+  const saveCurrentSessionSnapshot = async (explicitName?: string): Promise<SessionRecord> => {
+    const asNamed = Boolean(explicitName) || currentSessionKind() === "named";
+    const rec = buildSessionRecord(
+      explicitName
+        ? {
+            id: `named-${Date.now().toString(36)}`,
+            name: explicitName,
+            kind: "named",
+            created_at: new Date().toISOString(),
+          }
+        : undefined,
+    );
+    const saved = await saveSessionSnapshot(rec, asNamed);
+    if (asNamed) {
+      setCurrentSessionId(saved.id);
+      setCurrentSessionName(saved.name);
+      setCurrentSessionKind("named");
+      setSessionCreatedAt(saved.created_at);
+    }
+    await refreshSessions();
+    pluginRegistry.emit("session:save", { sessionId: saved.id, name: saved.name });
+    showToast(`Session saved: ${saved.name}`);
+    return saved;
+  };
+
+  const applySessionRecord = async (rec: SessionRecord) => {
+    if (rec.root_dir && rec.root_dir !== rootDir()) {
+      await loadFolder(rec.root_dir);
+    }
+
+    // Rehydrate Panes (ensure all 4 panels have at least 1 pane structure if referenced)
+    const nextPanes: PaneNode[] = rec.panes.map((p) => ({
+      id: p.id,
+      panel: (p.panel as PanelId) || "center",
+      activeContainerId: p.active_container_id ?? null,
+    }));
+    const ensurePanelPane = (panel: PanelId, fallbackId: string) => {
+      if (!nextPanes.some((p) => p.panel === panel)) {
+        nextPanes.push({ id: fallbackId, panel, activeContainerId: null });
+      }
+    };
+    ensurePanelPane("left", "pane-left-1");
+    ensurePanelPane("center", "pane-main-1");
+    ensurePanelPane("right", "pane-right-1");
+    ensurePanelPane("bottom", "pane-bottom-1");
+
+    const nextWeights: Record<string, number> = {};
+    for (const p of rec.panes) {
+      if (p.weight && Number.isFinite(p.weight)) nextWeights[p.id] = p.weight;
+    }
+
+    const nextContainers: ContainerTab[] = [];
+    for (const c of rec.containers) {
+      if (c.kind === "editor") {
+        let text = c.draft_content ?? "";
+        let dirtyFlag = c.dirty;
+        if (c.path && !c.dirty) {
+          try {
+            text = await readNote(c.path);
+            dirtyFlag = false;
+          } catch {
+            // File may have been moved/deleted; fall back to draft_content
+            text = c.draft_content ?? "";
+          }
+        }
+        nextContainers.push({
+          id: c.id,
+          kind: "editor",
+          paneId: c.pane_id,
+          title: c.title,
+          path: c.path ?? null,
+          content: text,
+          dirty: dirtyFlag,
+        });
+      } else {
+        nextContainers.push({
+          id: c.id,
+          kind: c.kind,
+          paneId: c.pane_id,
+          title: c.title,
+        });
+      }
+    }
+
+    // Ensure at least one editor container exists
+    if (!nextContainers.some((c) => c.kind === "editor")) {
+      const centerPane = nextPanes.find((p) => p.panel === "center") ?? nextPanes[0];
+      const fresh = makeEmptyEditorContainer(centerPane.id);
+      nextContainers.push(fresh);
+      centerPane.activeContainerId = fresh.id;
+    }
+
+    setPanes(nextPanes);
+    setPaneWeights(nextWeights);
+    setContainers(nextContainers);
+
+    const firstEditor =
+      nextContainers.find((c) => c.id === rec.active_editor_id && c.kind === "editor") ??
+      nextContainers.find((c) => c.kind === "editor")!;
+    setActiveEditorId(firstEditor.id);
+
+    const validActivePane = nextPanes.some((p) => p.id === rec.active_pane_id)
+      ? rec.active_pane_id
+      : firstEditor.paneId;
+    setActivePaneId(validActivePane);
+    setLastPaneByPanel({
+      left: nextPanes.find((p) => p.panel === "left")?.id ?? "pane-left-1",
+      center: nextPanes.find((p) => p.panel === "center")?.id ?? "pane-main-1",
+      right: nextPanes.find((p) => p.panel === "right")?.id ?? "pane-right-1",
+      bottom: nextPanes.find((p) => p.panel === "bottom")?.id ?? "pane-bottom-1",
+    });
+
+    setLeftVisible(rec.left_visible);
+    setRightVisible(rec.right_visible);
+    setBottomVisible(rec.bottom_visible);
+    if (rec.left_width >= 160) setLeftPanelWidth(rec.left_width);
+    if (rec.right_width >= 160) setRightPanelWidth(rec.right_width);
+    if (rec.bottom_height >= 100) setBottomPanelHeight(rec.bottom_height);
+
+    setCurrentSessionId(rec.id);
+    setCurrentSessionName(rec.name);
+    setCurrentSessionKind(rec.kind === "named" ? "named" : "ephemeral");
+    setSessionCreatedAt(rec.created_at);
+    setFileLoadVersion((v) => v + 1);
+
+    await syncLiveSession(buildSessionRecord());
+    pluginRegistry.emit("session:switch", { sessionId: rec.id, name: rec.name });
+    focusPane(validActivePane);
+  };
+
+  const restoreSession = async (sessionId: string) => {
+    // Save current session state before switching so we never lose work
+    await syncLiveSession(buildSessionRecord());
+    const data = await refreshSessions();
+    const target = [...data.named, ...data.history].find((s) => s.id === sessionId);
+    if (!target) {
+      showToast("Session not found");
+      return;
+    }
+    await applySessionRecord(target);
+    showToast(`Attached: ${target.name}`);
+  };
+
+  const restoreLastSession = async () => {
+    const last = await getLastSession();
+    if (!last) {
+      showToast("No previous session");
+      return;
+    }
+    await applySessionRecord(last);
+    showToast(`Restored: ${last.name}`);
+  };
+
+  const createNamedSession = async (name: string, fromCurrent = true): Promise<SessionRecord> => {
+    const trimmed = name.trim() || `session-${sessionStore().named.length + 1}`;
+    const now = new Date().toISOString();
+    const newId = `named-${Date.now().toString(36)}`;
+
+    if (fromCurrent) {
+      const rec = buildSessionRecord({
+        id: newId,
+        name: trimmed,
+        kind: "named",
+        created_at: now,
+      });
+      const saved = await saveSessionSnapshot(rec, true);
+      setCurrentSessionId(saved.id);
+      setCurrentSessionName(saved.name);
+      setCurrentSessionKind("named");
+      setSessionCreatedAt(saved.created_at);
+      await syncLiveSession(saved);
+      await refreshSessions();
+      pluginRegistry.emit("session:switch", { sessionId: saved.id, name: saved.name });
+      showToast(`Session: ${saved.name}`);
+      return saved;
+    }
+
+    // Blank new named session (keeps current root dir, resets panes/containers cleanly)
+    const freshEd = makeEmptyEditorContainer("pane-main-1");
+    const blankRec: SessionRecord = {
+      id: newId,
+      name: trimmed,
+      kind: "named",
+      root_dir: rootDir(),
+      panes: [
+        { id: "pane-left-1", panel: "left", active_container_id: "container-explorer", weight: 1 },
+        { id: "pane-main-1", panel: "center", active_container_id: freshEd.id, weight: 1 },
+        { id: "pane-right-1", panel: "right", active_container_id: null, weight: 1 },
+        { id: "pane-bottom-1", panel: "bottom", active_container_id: null, weight: 1 },
+      ],
+      containers: [
+        { id: "container-explorer", kind: "explorer", pane_id: "pane-left-1", title: "Explorer", path: null, draft_content: null, dirty: false },
+        { id: "container-properties", kind: "properties", pane_id: "pane-left-1", title: "Properties", path: null, draft_content: null, dirty: false },
+        { id: freshEd.id, kind: "editor", pane_id: "pane-main-1", title: "Untitled", path: null, draft_content: "", dirty: false },
+      ],
+      active_pane_id: "pane-main-1",
+      active_editor_id: freshEd.id,
+      left_visible: leftVisible(),
+      right_visible: false,
+      bottom_visible: false,
+      left_width: leftPanelWidth(),
+      right_width: rightPanelWidth(),
+      bottom_height: bottomPanelHeight(),
+      created_at: now,
+      updated_at: now,
+    };
+    const saved = await saveSessionSnapshot(blankRec, true);
+    await applySessionRecord(saved);
+    await refreshSessions();
+    showToast(`New session: ${saved.name}`);
+    return saved;
+  };
+
+  const removeSession = async (sessionId: string) => {
+    await deleteSessionRecord(sessionId);
+    if (currentSessionId() === sessionId) {
+      setCurrentSessionId(`session-${Date.now().toString(36)}`);
+      setCurrentSessionName("default");
+      setCurrentSessionKind("ephemeral");
+    }
+    await refreshSessions();
+  };
+
+  const closeWindowWithSession = async () => {
+    // Save all dirty file-backed editors first
+    for (const c of editorContainers()) {
+      if (c.dirty && c.path) {
+        await saveContainer(c, true);
+      }
+    }
+    const rec = buildSessionRecord();
+    await saveSessionSnapshot(rec, currentSessionKind() === "named");
+    if (isTauriRuntime()) {
+      await getCurrentWindow().close();
+    }
+  };
+
+  const openSessionModal = () => {
+    setSearchModalOpen(false);
+    setCommandPaletteOpen(false);
+    setSettingsOpen(false);
+    setMobileTabsOpen(false);
+    setSessionModalOpen(true);
   };
 
   const startContainerDrag = (containerId: string, e: PointerEvent) => {
@@ -872,6 +1199,8 @@ export function createWindowStore() {
     }
     const local = await getLocalState();
     await saveLocalState({ ...local, last_opened_file: path });
+    scheduleLiveSessionSync();
+    pluginRegistry.emit("file:open", { path });
   };
 
   const onEditorContentChange = (next: string, containerId?: string) => {
@@ -1133,6 +1462,10 @@ export function createWindowStore() {
       { id: "nib:new-note", title: "New Note", category: "File", defaultKeybinding: "Mod-n", run: () => void createNewNote() },
       { id: "nib:new-tab", title: "New Tab", category: "Container", defaultKeybinding: "Mod-t", run: () => openEmptyTab() },
       { id: "nib:close-tab", title: "Close Tab", category: "Container", defaultKeybinding: "Mod-w", run: () => void closeTab() },
+      { id: "nib:close-window-session", title: "Close Window (Save Session)", category: "Session", defaultKeybinding: "Mod-Shift-w", run: () => void closeWindowWithSession() },
+      { id: "nib:sessions", title: "Sessions", category: "Session", defaultKeybinding: "Mod-Shift-l", run: () => openSessionModal() },
+      { id: "nib:session-save", title: "Save Session Snapshot", category: "Session", run: () => void saveCurrentSessionSnapshot() },
+      { id: "nib:session-restore-last", title: "Restore Last Session", category: "Session", run: () => void restoreLastSession() },
       { id: "nib:next-tab", title: "Next Container", category: "Container", defaultKeybinding: "Mod-Shift-]", run: () => nextTab() },
       { id: "nib:prev-tab", title: "Previous Container", category: "Container", defaultKeybinding: "Mod-Shift-[", run: () => prevTab() },
       { id: "nib:split-pane", title: "Split Pane", category: "Pane", run: () => splitPane() },
@@ -1191,8 +1524,23 @@ export function createWindowStore() {
       await loadFolder(target.root_dir);
     }
 
+    await refreshSessions();
+
     if (target.file_path) {
       await openFile(target.file_path);
+    } else if (!isMobile && initialConfig.session?.restore_on_startup) {
+      const last = await getLastSession();
+      if (last && last.containers.length > 0) {
+        await applySessionRecord(last);
+        return;
+      }
+      if (initialConfig.startup_behavior === "last_note" && local.last_opened_file) {
+        try {
+          await openFile(local.last_opened_file);
+        } catch {
+          // Stay on clean empty tab
+        }
+      }
     } else if (initialConfig.startup_behavior === "last_note" && local.last_opened_file) {
       try {
         await openFile(local.last_opened_file);
@@ -1200,7 +1548,49 @@ export function createWindowStore() {
         // Stay on clean empty tab
       }
     }
+    scheduleLiveSessionSync();
   };
+
+  const attachPluginHost = () =>
+    pluginRegistry.attachHost({
+      getEditorView: () => null,
+      getContent: () => content(),
+      setContent: (next) => onEditorContentChange(next),
+      getRootDir: () => rootDir(),
+      getActiveFilePath: () => activeFilePath(),
+      openFile: (path, line) => openFile(path, line),
+      getLayout: () => ({
+        rootDir: rootDir(),
+        activePaneId: activePaneId(),
+        focusedPanel: focusedPanel(),
+        activeFilePath: activeFilePath(),
+        panes: panes().map((p) => ({
+          id: p.id,
+          panel: p.panel,
+          activeContainerId: p.activeContainerId,
+        })),
+        containers: containers().map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          paneId: c.paneId,
+          title: c.title,
+          path: c.path,
+        })),
+      }),
+      togglePanel: (panel) => togglePanel(panel),
+      splitPane: (paneId) => splitPane(paneId),
+      openContainer: (kind, paneId) =>
+        openContainerKindInPane(paneId ?? activePaneId(), kind as ContainerKind),
+      listSessions: () => refreshSessions(),
+      getCurrentSession: () => buildSessionRecord(),
+      saveSessionSnapshot: (name) => saveCurrentSessionSnapshot(name),
+      restoreSession: (id) => restoreSession(id),
+      createNamedSession: (name, fromCurrent) => createNamedSession(name, fromCurrent),
+      deleteSession: (id) => removeSession(id),
+      showToast: (msg) => showToast(msg),
+      getConfig: () => config(),
+      updateConfig: (next) => updateConfig(next),
+    });
 
   return {
     config,
@@ -1271,6 +1661,23 @@ export function createWindowStore() {
     setCommandPaletteOpen,
     searchModalOpen,
     setSearchModalOpen,
+    sessionModalOpen,
+    setSessionModalOpen,
+    openSessionModal,
+    currentSessionId,
+    currentSessionName,
+    currentSessionKind,
+    sessionStore,
+    setSessionStore,
+    refreshSessions,
+    saveCurrentSessionSnapshot,
+    createNamedSession,
+    restoreSession,
+    restoreLastSession,
+    removeSession,
+    closeWindowWithSession,
+    scheduleLiveSessionSync,
+    attachPluginHost,
     searchMode,
     setSearchMode,
     pendingJumpLine,

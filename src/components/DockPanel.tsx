@@ -6,6 +6,7 @@ import {
   Files,
   PanelLeft,
   Plus,
+  Puzzle,
   Search,
   Settings,
   SlidersHorizontal,
@@ -13,27 +14,63 @@ import {
   Terminal,
   X,
 } from "lucide-solid";
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { pluginRegistry } from "../plugins/registry";
 import type { ContainerKind, ContainerTab, PanelId, WindowStore } from "../state/store";
 import { EditorView } from "./EditorView";
 import { ExplorerPane } from "./ExplorerPane";
 import { PropertiesPanel } from "./PropertiesPanel";
 
-const CONTAINER_REGISTRY: Array<{ kind: ContainerKind; title: string; keywords: string }> = [
+const BUILTIN_CONTAINERS: Array<{ kind: ContainerKind; title: string; keywords: string }> = [
   { kind: "editor", title: "Editor", keywords: "editor markdown note write text" },
   { kind: "explorer", title: "Explorer", keywords: "explorer files folder tree sidebar" },
   { kind: "properties", title: "Properties", keywords: "properties frontmatter yaml metadata tags" },
 ];
 
+function PluginContainerView(props: { tab: () => ContainerTab; paneId: string }) {
+  let hostEl: HTMLDivElement | undefined;
+  let cleanup: (() => void) | void;
+
+  onMount(() => {
+    const def = pluginRegistry.getContainer(props.tab().kind);
+    if (hostEl && def) {
+      cleanup = def.mount(hostEl, {
+        containerId: props.tab().id,
+        paneId: props.paneId,
+        api: pluginRegistry.createAPI(`container:${props.tab().kind}`),
+      });
+    }
+    onCleanup(() => {
+      if (typeof cleanup === "function") cleanup();
+    });
+  });
+
+  return <div class="nib-plugin-container" ref={hostEl} />;
+}
+
 function ContainerPicker(props: { store: WindowStore; paneId: string; isFocused: () => boolean }) {
   let inputRef: HTMLInputElement | undefined;
   const [query, setQuery] = createSignal("");
   const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [pluginVer, setPluginVer] = createSignal(0);
+  const unsub = pluginRegistry.onChange(() => setPluginVer((v) => v + 1));
+  onCleanup(unsub);
+
+  const allContainers = createMemo(() => {
+    pluginVer();
+    const custom = pluginRegistry.getContainers().map((c) => ({
+      kind: c.kind as ContainerKind,
+      title: c.title,
+      keywords: (c.keywords ?? [c.title, c.kind]).join(" "),
+    }));
+    return [...BUILTIN_CONTAINERS, ...custom];
+  });
 
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase();
-    if (!q) return CONTAINER_REGISTRY;
-    return CONTAINER_REGISTRY.filter((c) => `${c.title} ${c.keywords}`.toLowerCase().includes(q));
+    const list = allContainers();
+    if (!q) return list;
+    return list.filter((c) => `${c.title} ${c.keywords}`.toLowerCase().includes(q));
   });
 
   createEffect(() => {
@@ -56,7 +93,8 @@ function ContainerPicker(props: { store: WindowStore; paneId: string; isFocused:
   const renderIcon = (kind: ContainerKind) => {
     if (kind === "editor") return <FileText size={14} />;
     if (kind === "explorer") return <Files size={14} />;
-    return <SlidersHorizontal size={14} />;
+    if (kind === "properties") return <SlidersHorizontal size={14} />;
+    return <Puzzle size={14} />;
   };
 
   return (
@@ -146,7 +184,8 @@ function PaneView(props: {
 
   const renderNonEditorIcon = (kind: ContainerTab["kind"]) => {
     if (kind === "explorer") return <Files size={15} />;
-    return <SlidersHorizontal size={15} />;
+    if (kind === "properties") return <SlidersHorizontal size={15} />;
+    return <Puzzle size={15} />;
   };
 
   return (
@@ -291,7 +330,14 @@ function PaneView(props: {
               fallback={
                 <Show
                   when={tab().kind === "explorer"}
-                  fallback={<PropertiesPanel store={props.store} paneId={props.paneId} />}
+                  fallback={
+                    <Show
+                      when={tab().kind === "properties"}
+                      fallback={<PluginContainerView tab={tab} paneId={props.paneId} />}
+                    >
+                      <PropertiesPanel store={props.store} paneId={props.paneId} />
+                    </Show>
+                  }
                 >
                   <ExplorerPane store={props.store} paneId={props.paneId} />
                 </Show>

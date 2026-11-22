@@ -174,6 +174,20 @@ pub fn run() {
             if let tauri::WindowEvent::Destroyed = event {
                 let state = window.state::<AppState>();
                 let label = window.label().to_string();
+                let ring_size = state
+                    .config
+                    .read()
+                    .map(|c| c.session.ring_buffer_size)
+                    .unwrap_or(8);
+                if let Ok(mut mgr) = state.sessions.lock() {
+                    if let Some(rec) = mgr.remove_live_window(&label) {
+                        if rec.kind == "named" {
+                            let _ = mgr.save_named(rec);
+                        } else {
+                            let _ = mgr.save_ephemeral(rec, ring_size);
+                        }
+                    }
+                };
                 let removed = state
                     .window_targets
                     .lock()
@@ -209,6 +223,11 @@ pub fn run() {
             commands::config::get_config_paths,
             commands::config::get_local_state,
             commands::config::save_local_state,
+            commands::sessions::list_sessions,
+            commands::sessions::get_last_session,
+            commands::sessions::sync_live_session,
+            commands::sessions::save_session_snapshot,
+            commands::sessions::delete_session,
             commands::storage::get_storage_credentials_status,
             commands::storage::save_r2_credentials,
             commands::storage::clear_r2_credentials,
@@ -219,6 +238,30 @@ pub fn run() {
             commands::window::open_new_window,
             commands::window::get_window_launch_target,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Nib");
+        .build(tauri::generate_context!())
+        .expect("error while building Nib")
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::Exit => {
+                let state = app_handle.state::<AppState>();
+                let ring_size = state
+                    .config
+                    .read()
+                    .map(|c| c.session.ring_buffer_size)
+                    .unwrap_or(8);
+                if let Ok(mut mgr) = state.sessions.lock() {
+                    mgr.flush_live_on_exit(ring_size);
+                };
+            }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } => {
+                if !has_visible_windows {
+                    let state = app_handle.state::<AppState>();
+                    let _ = spawn_window(app_handle, &state, None, None);
+                }
+            }
+            _ => {}
+        });
 }

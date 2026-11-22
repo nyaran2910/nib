@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub ui: UiVisibilityConfig,
     pub explorer: ExplorerConfig,
     pub properties: PropertiesConfig,
+    pub session: SessionConfig,
     /// Maps command IDs (e.g. "nib:save", "nib:search-omni") to key sequences
     pub keybindings: HashMap<String, String>,
     pub storage: StorageConfig,
@@ -79,6 +80,17 @@ pub struct ExplorerConfig {
 pub struct PropertiesConfig {
     /// "vim" (j/k/h/l + i/o/d/Esc) | "standard"
     pub keymap_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionConfig {
+    /// Auto-save session snapshot interval in minutes (0 = manual + on close/quit only; e.g. 15)
+    pub auto_save_interval_min: u32,
+    /// Max number of auto-saved ephemeral ring-buffer snapshots kept
+    pub ring_buffer_size: usize,
+    /// Automatically restore the last saved session on startup
+    pub restore_on_startup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +236,16 @@ impl Default for PropertiesConfig {
     }
 }
 
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            auto_save_interval_min: 0,
+            ring_buffer_size: 8,
+            restore_on_startup: true,
+        }
+    }
+}
+
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
@@ -247,6 +269,8 @@ impl Default for AppConfig {
         keybindings.insert("nib:new-note".into(), "Mod-n".into());
         keybindings.insert("nib:new-tab".into(), "Mod-t".into());
         keybindings.insert("nib:close-tab".into(), "Mod-w".into());
+        keybindings.insert("nib:close-window-session".into(), "Mod-Shift-w".into());
+        keybindings.insert("nib:sessions".into(), "Mod-Shift-l".into());
         keybindings.insert("nib:next-tab".into(), "Mod-Shift-]".into());
         keybindings.insert("nib:prev-tab".into(), "Mod-Shift-[".into());
         keybindings.insert("nib:new-window".into(), "Mod-Shift-n".into());
@@ -275,6 +299,7 @@ impl Default for AppConfig {
             ui: UiVisibilityConfig::default(),
             explorer: ExplorerConfig::default(),
             properties: PropertiesConfig::default(),
+            session: SessionConfig::default(),
             keybindings,
             storage: StorageConfig::default(),
         }

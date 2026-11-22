@@ -49,6 +49,54 @@ export interface PropertiesConfig {
   keymap_mode: "vim" | "standard" | string;
 }
 
+export interface SessionConfig {
+  auto_save_interval_min: number;
+  ring_buffer_size: number;
+  restore_on_startup: boolean;
+}
+
+export interface SessionContainerState {
+  id: string;
+  kind: string;
+  pane_id: string;
+  title: string;
+  path?: string | null;
+  draft_content?: string | null;
+  dirty: boolean;
+}
+
+export interface SessionPaneState {
+  id: string;
+  panel: string;
+  active_container_id?: string | null;
+  weight: number;
+}
+
+export interface SessionRecord {
+  id: string;
+  name: string;
+  kind: "named" | "ephemeral" | string;
+  root_dir?: string | null;
+  panes: SessionPaneState[];
+  containers: SessionContainerState[];
+  active_pane_id: string;
+  active_editor_id?: string | null;
+  left_visible: boolean;
+  right_visible: boolean;
+  bottom_visible: boolean;
+  left_width: number;
+  right_width: number;
+  bottom_height: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionStoreData {
+  last_session_id?: string | null;
+  named: SessionRecord[];
+  history: SessionRecord[];
+}
+
 export interface StorageConfig {
   provider: "local_folder" | "r2" | string;
   local_images_dir: string;
@@ -83,6 +131,7 @@ export interface AppConfig {
   ui: UiVisibilityConfig;
   explorer: ExplorerConfig;
   properties: PropertiesConfig;
+  session: SessionConfig;
   keybindings: Record<string, string>;
   storage: StorageConfig;
 }
@@ -172,11 +221,18 @@ export const DEFAULT_CONFIG: AppConfig = {
   properties: {
     keymap_mode: "vim",
   },
+  session: {
+    auto_save_interval_min: 0,
+    ring_buffer_size: 8,
+    restore_on_startup: true,
+  },
   keybindings: {
     "nib:save": "Mod-s",
     "nib:new-note": "Mod-n",
     "nib:new-tab": "Mod-t",
     "nib:close-tab": "Mod-w",
+    "nib:close-window-session": "Mod-Shift-w",
+    "nib:sessions": "Mod-Shift-l",
     "nib:next-tab": "Mod-Shift-]",
     "nib:prev-tab": "Mod-Shift-[",
     "nib:new-window": "Mod-Shift-n",
@@ -479,4 +535,32 @@ export async function confirmDialog(message: string, title = "Nib"): Promise<boo
 export async function listenEvent<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!isTauriRuntime()) return () => {};
   return listen<T>(event, (e) => handler(e.payload));
+}
+
+export async function listSessions(): Promise<SessionStoreData> {
+  if (!isTauriRuntime()) return { last_session_id: null, named: [], history: [] };
+  return invoke<SessionStoreData>("list_sessions");
+}
+
+export async function getLastSession(): Promise<SessionRecord | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<SessionRecord | null>("get_last_session");
+}
+
+export async function syncLiveSession(record: SessionRecord): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("sync_live_session", { record });
+}
+
+export async function saveSessionSnapshot(
+  record: SessionRecord,
+  asNamed: boolean,
+): Promise<SessionRecord> {
+  if (!isTauriRuntime()) return record;
+  return invoke<SessionRecord>("save_session_snapshot", { record, asNamed });
+}
+
+export async function deleteSessionRecord(sessionId: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("delete_session", { sessionId });
 }

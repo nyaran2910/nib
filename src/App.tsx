@@ -9,14 +9,21 @@ import {
   Settings,
   X,
 } from "lucide-solid";
-import { For, Show, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, onCleanup, onMount } from "solid-js";
 import { CommandPalette } from "./components/CommandPalette";
 import { DockPanel } from "./components/DockPanel";
 import { SearchModal } from "./components/SearchModal";
+import { SessionModal } from "./components/SessionModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { StatusBar } from "./components/StatusBar";
 import { pluginRegistry } from "./plugins/registry";
-import { getConfig, listenEvent, unwatchDirectory, type AppConfig } from "./state/ipc";
+import {
+  getConfig,
+  listenEvent,
+  unwatchDirectory,
+  type AppConfig,
+  type SessionStoreData,
+} from "./state/ipc";
 import { createWindowStore, type PanelId } from "./state/store";
 
 const PUNCT_CODE_MAP: Record<string, { code: string; shifted?: string }> = {
@@ -97,14 +104,49 @@ function matchesKeybinding(e: KeyboardEvent, binding: string): boolean {
 export function App() {
   const store = createWindowStore();
 
+  // Keep in-process tmux session server warm whenever layout, containers, or root change
+  createEffect(() => {
+    store.panes();
+    store.containers();
+    store.activePaneId();
+    store.activeEditorId();
+    store.leftVisible();
+    store.rightVisible();
+    store.bottomVisible();
+    store.leftPanelWidth();
+    store.rightPanelWidth();
+    store.bottomPanelHeight();
+    store.rootDir();
+    store.scheduleLiveSessionSync();
+  });
+
+  // Optional tmux-continuum style periodic snapshot auto-save (0 = manual + close/quit only)
+  createEffect(() => {
+    const minutes = store.config().session?.auto_save_interval_min ?? 0;
+    if (minutes <= 0) return;
+    const ms = Math.max(1, minutes) * 60_000;
+    const timer = window.setInterval(() => {
+      void store.saveCurrentSessionSnapshot();
+    }, ms);
+    onCleanup(() => window.clearInterval(timer));
+  });
+
   onMount(async () => {
     const disposeCommands = store.registerBuiltinCommands();
+    const disposeHost = store.attachPluginHost();
     await store.bootstrap();
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       // Built-in Ctrl+Tab / Ctrl+Shift+Tab container cycling inside active Pane
       if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
-        if (store.settingsOpen() || store.searchModalOpen() || store.commandPaletteOpen()) return;
+        if (
+          store.settingsOpen() ||
+          store.searchModalOpen() ||
+          store.commandPaletteOpen() ||
+          store.sessionModalOpen()
+        ) {
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         if (e.shiftKey) store.prevTab();
@@ -138,7 +180,11 @@ export function App() {
         if (JSON.stringify(effective) !== JSON.stringify(store.config())) {
           store.setConfig(effective);
           store.applyThemeTokens(effective);
+          pluginRegistry.emit("config:change", { config: effective });
         }
+      }),
+      listenEvent<SessionStoreData>("sessions:updated", (data) => {
+        store.setSessionStore(data);
       }),
       listenEvent<{ root: string }>("fs:changed", (payload) => {
         if (payload.root === store.rootDir()) {
@@ -167,6 +213,7 @@ export function App() {
       if (fsRefreshTimer !== undefined) window.clearTimeout(fsRefreshTimer);
       const dir = store.rootDir();
       if (dir) void unwatchDirectory(dir);
+      disposeHost();
       disposeCommands();
       for (const unlisten of unlisteners) {
         unlisten();
@@ -365,6 +412,7 @@ export function App() {
 
       <SearchModal store={store} />
       <CommandPalette store={store} />
+      <SessionModal store={store} />
       <SettingsModal store={store} />
     </div>
   );
